@@ -32,38 +32,47 @@ export const getCurrentUser = () => {
   return supabase.auth.getUser()
 }
 
-// Family helper functions
+// Family helper functions (updated to handle new return format)
 export const createFamily = async (familyName, memberName) => {
-  const { data, error } = await supabase.rpc('create_family_and_member', {
-    family_name: familyName,
-    member_name: memberName
-  })
-  return { data, error }
+  try {
+    const { data, error } = await supabase.rpc('create_family_and_member', {
+      family_name: familyName,
+      member_name: memberName
+    })
+    
+    if (error) {
+      console.error('Supabase RPC error:', error)
+      return { data: null, error }
+    }
+    
+    console.log('Create family response:', data)
+    return { data, error: null }
+  } catch (err) {
+    console.error('Create family catch error:', err)
+    return { data: null, error: err }
+  }
 }
 
 export const joinFamily = async (inviteCode, memberName) => {
-  const { data, error } = await supabase.rpc('join_family_by_code', {
-    invite_code: inviteCode,
-    member_name: memberName
-  })
-  return { data, error }
-}
-
-export const getUserFamily = async () => {
-  const { data, error } = await supabase
-    .from('family_members')
-    .select(`
-      id,
-      name,
-      role,
-      family_id,
-      families!inner(
-        id,
-        name,
-        invite_code
-      )
-    `)
-    .single()
-  
-  return { data, error }
+  try {
+    const { data, error } = await supabase.rpc('join_family_by_code', {
+      invite_code: inviteCode,
+      member_name: memberName
+    })
+    
+    if (error) {
+      console.error('Supabase RPC error:', error)
+      return { data: null, error }
+    }
+    
+    if (data && !data.success) {
+      return { data: null, error: { message: data.error } }
+    }
+    
+    console.log('Join family response:', data)
+    return { data, error: null }
+  } catch (err) {
+    console.error('Join family catch error:', err)
+    return { data: null, error: err }
+  }
 }
