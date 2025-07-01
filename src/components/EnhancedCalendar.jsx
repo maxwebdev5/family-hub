@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { supabase } from '../supabase.js'
+import { supabase, initiateGoogleCalendarAuth, syncGoogleCalendarEvents, disconnectGoogleCalendar, isGoogleCalendarConnected } from '../supabase.js'
+import GoogleAuthCallback from './GoogleAuthCallback.jsx'
 
 const EnhancedCalendar = ({ family }) => {
   const [events, setEvents] = useState([])
@@ -8,10 +9,12 @@ const EnhancedCalendar = ({ family }) => {
   const [viewMode, setViewMode] = useState('month') // 'month', 'week', 'list'
   const [showEventModal, setShowEventModal] = useState(false)
   const [showSyncModal, setShowSyncModal] = useState(false)
+  const [showGoogleCallback, setShowGoogleCallback] = useState(false)
   const [editingEvent, setEditingEvent] = useState(null)
   const [selectedDate, setSelectedDate] = useState(null)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [googleConnected, setGoogleConnected] = useState(false)
   const [eventForm, setEventForm] = useState({
     title: '',
     event_date: '',
@@ -35,10 +38,19 @@ const EnhancedCalendar = ({ family }) => {
     { value: '#f97316', name: 'Amber' }
   ]
 
+  // Detect Google auth callback
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('code') || urlParams.get('error')) {
+      setShowGoogleCallback(true)
+    }
+  }, [])
+
   useEffect(() => {
     if (family) {
       loadEvents()
       loadSyncSettings()
+      checkGoogleConnection()
     }
   }, [family, currentDate])
 
@@ -77,6 +89,16 @@ const EnhancedCalendar = ({ family }) => {
       setSyncSettings(data)
     } catch (error) {
       console.error('Error loading sync settings:', error)
+    }
+  }
+
+  const checkGoogleConnection = async () => {
+    try {
+      const connected = await isGoogleCalendarConnected(family.family_id)
+      setGoogleConnected(connected)
+    } catch (error) {
+      console.error('Error checking Google connection:', error)
+      setGoogleConnected(false)
     }
   }
 
@@ -135,6 +157,7 @@ const EnhancedCalendar = ({ family }) => {
       })
     } catch (error) {
       console.error('Error saving event:', error)
+      alert('Error saving event: ' + error.message)
     }
   }
 
@@ -151,28 +174,67 @@ const EnhancedCalendar = ({ family }) => {
         }
       } catch (error) {
         console.error('Error deleting event:', error)
+        alert('Error deleting event: ' + error.message)
       }
     }
   }
 
-  const syncGoogleCalendar = async () => {
+  const handleGoogleCalendarAction = async () => {
+    if (!googleConnected) {
+      // First time setup - initiate OAuth
+      try {
+        initiateGoogleCalendarAuth()
+      } catch (error) {
+        console.error('Error initiating Google auth:', error)
+        alert('Error: ' + error.message)
+      }
+      return
+    }
+    
+    // Already connected - sync events
     setSyncing(true)
     try {
-      alert('Google Calendar sync would be implemented here. This requires backend API integration.')
-      
-      await supabase
-        .from('calendar_sync_settings')
-        .update({ 
-          last_sync_at: new Date().toISOString(),
-          google_calendar_enabled: true 
-        })
-        .eq('family_id', family.family_id)
-        
+      const result = await syncGoogleCalendarEvents(family.family_id)
+      alert(result.message)
+      loadEvents() // Reload events to show newly synced ones
+      loadSyncSettings() // Reload sync settings
     } catch (error) {
-      console.error('Error syncing with Google Calendar:', error)
+      console.error('Error syncing:', error)
+      alert('Error syncing Google Calendar: ' + error.message)
     } finally {
       setSyncing(false)
     }
+  }
+
+  const handleDisconnectGoogle = async () => {
+    if (confirm('Are you sure you want to disconnect Google Calendar? This will remove all synced Google events.')) {
+      try {
+        await disconnectGoogleCalendar(family.family_id)
+        setGoogleConnected(false)
+        loadEvents() // Reload to remove Google events
+        loadSyncSettings()
+        alert('Google Calendar disconnected successfully')
+      } catch (error) {
+        console.error('Error disconnecting:', error)
+        alert('Error disconnecting Google Calendar: ' + error.message)
+      }
+    }
+  }
+
+  const handleGoogleAuthSuccess = () => {
+    setShowGoogleCallback(false)
+    setShowSyncModal(false)
+    setGoogleConnected(true)
+    loadSyncSettings() // Reload sync settings
+    loadEvents() // Reload events
+    alert('Google Calendar connected successfully!')
+  }
+
+  const handleGoogleAuthError = (error) => {
+    setShowGoogleCallback(false)
+    setShowSyncModal(false)
+    console.error('Google auth error:', error)
+    alert('Failed to connect Google Calendar: ' + error.message)
   }
 
   const getDaysInMonth = () => {
@@ -220,6 +282,10 @@ const EnhancedCalendar = ({ family }) => {
     setCurrentDate(newDate)
   }
 
+  const goToToday = () => {
+    setCurrentDate(new Date())
+  }
+
   const MonthView = () => {
     const days = getDaysInMonth()
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -229,16 +295,24 @@ const EnhancedCalendar = ({ family }) => {
         <div className="flex items-center justify-between p-4 border-b">
           <button
             onClick={() => navigateMonth(-1)}
-            className="p-2 hover:bg-gray-100 rounded"
+            className="p-2 hover:bg-gray-100 rounded text-lg"
           >
             ←
           </button>
-          <h3 className="text-lg font-semibold">
-            {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-          </h3>
+          <div className="flex items-center space-x-4">
+            <h3 className="text-lg font-semibold">
+              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </h3>
+            <button
+              onClick={goToToday}
+              className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200"
+            >
+              Today
+            </button>
+          </div>
           <button
             onClick={() => navigateMonth(1)}
-            className="p-2 hover:bg-gray-100 rounded"
+            className="p-2 hover:bg-gray-100 rounded text-lg"
           >
             →
           </button>
@@ -280,7 +354,7 @@ const EnhancedCalendar = ({ family }) => {
                       {dayEvents.slice(0, 3).map(event => (
                         <div
                           key={event.id}
-                          className="text-xs p-1 rounded truncate text-white"
+                          className="text-xs p-1 rounded truncate text-white cursor-pointer"
                           style={{ backgroundColor: event.color }}
                           onClick={(e) => {
                             e.stopPropagation()
@@ -299,6 +373,7 @@ const EnhancedCalendar = ({ family }) => {
                             setShowEventModal(true)
                           }}
                         >
+                          {event.external_source === 'google' && '📅 '}
                           {event.all_day ? event.title : `${formatTime(event.event_time)} ${event.title}`}
                         </div>
                       ))}
@@ -339,9 +414,14 @@ const EnhancedCalendar = ({ family }) => {
                       style={{ backgroundColor: event.color }}
                     />
                     <h4 className="font-medium">{event.title}</h4>
-                    {event.external_source !== 'manual' && (
+                    {event.external_source === 'google' && (
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">
+                        📅 Google
+                      </span>
+                    )}
+                    {event.external_source === 'manual' && (
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
-                        {event.external_source}
+                        Manual
                       </span>
                     )}
                   </div>
@@ -383,12 +463,16 @@ const EnhancedCalendar = ({ family }) => {
                       setShowEventModal(true)
                     }}
                     className="text-blue-600 hover:text-blue-800"
+                    disabled={event.external_source === 'google'}
+                    title={event.external_source === 'google' ? 'Google Calendar events cannot be edited here' : 'Edit event'}
                   >
                     ✏️
                   </button>
                   <button
                     onClick={() => deleteEvent(event.id)}
                     className="text-red-600 hover:text-red-800"
+                    disabled={event.external_source === 'google'}
+                    title={event.external_source === 'google' ? 'Google Calendar events cannot be deleted here' : 'Delete event'}
                   >
                     🗑️
                   </button>
@@ -411,9 +495,11 @@ const EnhancedCalendar = ({ family }) => {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Family Calendar</h2>
         <div className="flex space-x-2">
+          {/* View Mode Selector */}
           <div className="bg-white rounded-lg shadow p-1 flex">
             <button
               onClick={() => setViewMode('month')}
@@ -467,9 +553,35 @@ const EnhancedCalendar = ({ family }) => {
         </div>
       </div>
 
+      {/* Google Calendar Status Banner */}
+      {googleConnected && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            <span className="text-green-800 text-sm">
+              Google Calendar connected
+              {syncSettings?.last_sync_at && (
+                <span className="text-green-600 ml-2">
+                  • Last sync: {new Date(syncSettings.last_sync_at).toLocaleString()}
+                </span>
+              )}
+            </span>
+          </div>
+          <button
+            onClick={handleGoogleCalendarAction}
+            disabled={syncing}
+            className="text-green-700 hover:text-green-900 text-sm font-medium"
+          >
+            {syncing ? 'Syncing...' : '🔄 Sync Now'}
+          </button>
+        </div>
+      )}
+
+      {/* Calendar Views */}
       {viewMode === 'month' && <MonthView />}
       {viewMode === 'list' && <ListView />}
 
+      {/* Event Modal */}
       {showEventModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -484,6 +596,14 @@ const EnhancedCalendar = ({ family }) => {
                 ✕
               </button>
             </div>
+
+            {editingEvent?.external_source === 'google' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <p className="text-blue-800 text-sm">
+                  📅 This is a Google Calendar event. Edit it in Google Calendar to see changes here.
+                </p>
+              </div>
+            )}
             
             <form onSubmit={saveEvent} className="space-y-4">
               <div>
@@ -495,6 +615,7 @@ const EnhancedCalendar = ({ family }) => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter event title"
                   required
+                  disabled={editingEvent?.external_source === 'google'}
                 />
               </div>
 
@@ -504,6 +625,7 @@ const EnhancedCalendar = ({ family }) => {
                   checked={eventForm.all_day}
                   onChange={(e) => setEventForm(prev => ({ ...prev, all_day: e.target.checked }))}
                   className="w-4 h-4"
+                  disabled={editingEvent?.external_source === 'google'}
                 />
                 <label className="text-sm font-medium text-gray-700">All Day Event</label>
               </div>
@@ -517,6 +639,7 @@ const EnhancedCalendar = ({ family }) => {
                     onChange={(e) => setEventForm(prev => ({ ...prev, event_date: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
+                    disabled={editingEvent?.external_source === 'google'}
                   />
                 </div>
                 {!eventForm.all_day && (
@@ -527,6 +650,7 @@ const EnhancedCalendar = ({ family }) => {
                       value={eventForm.event_time}
                       onChange={(e) => setEventForm(prev => ({ ...prev, event_time: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={editingEvent?.external_source === 'google'}
                     />
                   </div>
                 )}
@@ -540,6 +664,7 @@ const EnhancedCalendar = ({ family }) => {
                     value={eventForm.end_date}
                     onChange={(e) => setEventForm(prev => ({ ...prev, end_date: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={editingEvent?.external_source === 'google'}
                   />
                 </div>
                 {!eventForm.all_day && (
@@ -550,6 +675,7 @@ const EnhancedCalendar = ({ family }) => {
                       value={eventForm.end_time}
                       onChange={(e) => setEventForm(prev => ({ ...prev, end_time: e.target.value }))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={editingEvent?.external_source === 'google'}
                     />
                   </div>
                 )}
@@ -563,6 +689,7 @@ const EnhancedCalendar = ({ family }) => {
                   onChange={(e) => setEventForm(prev => ({ ...prev, location: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter location"
+                  disabled={editingEvent?.external_source === 'google'}
                 />
               </div>
               
@@ -574,28 +701,31 @@ const EnhancedCalendar = ({ family }) => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Enter event description..."
+                  disabled={editingEvent?.external_source === 'google'}
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
-                <div className="flex space-x-2">
-                  {eventColors.map(color => (
-                    <button
-                      key={color.value}
-                      type="button"
-                      onClick={() => setEventForm(prev => ({ ...prev, color: color.value }))}
-                      className={`w-8 h-8 rounded-full ${
-                        eventForm.color === color.value 
-                          ? 'ring-2 ring-offset-2 ring-gray-400' 
-                          : ''
-                      }`}
-                      style={{ backgroundColor: color.value }}
-                      title={color.name}
-                    />
-                  ))}
+              {editingEvent?.external_source !== 'google' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
+                  <div className="flex space-x-2">
+                    {eventColors.map(color => (
+                      <button
+                        key={color.value}
+                        type="button"
+                        onClick={() => setEventForm(prev => ({ ...prev, color: color.value }))}
+                        className={`w-8 h-8 rounded-full ${
+                          eventForm.color === color.value 
+                            ? 'ring-2 ring-offset-2 ring-gray-400' 
+                            : ''
+                        }`}
+                        style={{ backgroundColor: color.value }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
@@ -603,46 +733,62 @@ const EnhancedCalendar = ({ family }) => {
                   onClick={() => setShowEventModal(false)}
                   className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
                 >
-                  Cancel
+                  {editingEvent?.external_source === 'google' ? 'Close' : 'Cancel'}
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  💾 Save
-                </button>
+                {editingEvent?.external_source !== 'google' && (
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    💾 Save
+                  </button>
+                )}
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* Calendar Sync Modal */}
       {showSyncModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Calendar Sync</h3>
-              <button
-                onClick={() => setShowSyncModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ✕
-              </button>
             </div>
             
             <div className="space-y-4">
               <div className="p-4 bg-blue-50 rounded-lg">
                 <h4 className="font-medium text-blue-900 mb-2">Google Calendar</h4>
                 <p className="text-sm text-blue-700 mb-3">
-                  Sync events with your Google Calendar automatically.
+                  {googleConnected 
+                    ? 'Connected! Your Google Calendar events are synced.'
+                    : 'Sync events with your Google Calendar automatically.'
+                  }
                 </p>
-                <button
-                  onClick={syncGoogleCalendar}
-                  disabled={syncing}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {syncing ? 'Connecting...' : '🔗 Connect Google Calendar'}
-                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleGoogleCalendarAction}
+                    disabled={syncing}
+                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {syncing ? 'Syncing...' : googleConnected ? '🔄 Sync Now' : '🔗 Connect Google Calendar'}
+                  </button>
+                  {googleConnected && (
+                    <button
+                      onClick={handleDisconnectGoogle}
+                      className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
+                    >
+                      🔌 Disconnect
+                    </button>
+                  )}
+                </div>
+                {googleConnected && (
+                  <div className="text-xs text-green-600 mt-2 flex items-center">
+                    <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                    Connected and syncing
+                  </div>
+                )}
               </div>
 
               <div className="p-4 bg-gray-50 rounded-lg">
@@ -676,6 +822,14 @@ const EnhancedCalendar = ({ family }) => {
                   Last sync: {new Date(syncSettings.last_sync_at).toLocaleString()}
                 </div>
               )}
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <h5 className="font-medium text-yellow-800 mb-1">About Calendar Sync</h5>
+                <p className="text-sm text-yellow-700">
+                  Google Calendar events are imported as read-only. To edit or delete them, 
+                  use Google Calendar directly. Changes will sync automatically.
+                </p>
+              </div>
             </div>
             
             <div className="flex justify-end mt-6">
@@ -688,6 +842,15 @@ const EnhancedCalendar = ({ family }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Google Auth Callback Component */}
+      {showGoogleCallback && (
+        <GoogleAuthCallback 
+          family={family}
+          onSuccess={handleGoogleAuthSuccess}
+          onError={handleGoogleAuthError}
+        />
       )}
     </div>
   )
