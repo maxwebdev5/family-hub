@@ -158,10 +158,8 @@ const EnhancedCalendar = ({ family }) => {
   const syncGoogleCalendar = async () => {
     setSyncing(true)
     try {
-      // This would integrate with Google Calendar API
       alert('Google Calendar sync would be implemented here. This requires backend API integration.')
       
-      // Update sync settings
       await supabase
         .from('calendar_sync_settings')
         .update({ 
@@ -187,12 +185,10 @@ const EnhancedCalendar = ({ family }) => {
 
     const days = []
     
-    // Add empty cells for days before the first day of the month
     for (let i = 0; i < startingDayOfWeek; i++) {
       days.push(null)
     }
     
-    // Add all days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       days.push(new Date(year, month, day))
     }
@@ -230,7 +226,6 @@ const EnhancedCalendar = ({ family }) => {
     
     return (
       <div className="bg-white rounded-lg shadow">
-        {/* Month header */}
         <div className="flex items-center justify-between p-4 border-b">
           <button
             onClick={() => navigateMonth(-1)}
@@ -249,7 +244,6 @@ const EnhancedCalendar = ({ family }) => {
           </button>
         </div>
         
-        {/* Day names */}
         <div className="grid grid-cols-7 border-b">
           {dayNames.map(day => (
             <div key={day} className="p-3 text-center text-sm font-medium text-gray-500 border-r last:border-r-0">
@@ -258,7 +252,6 @@ const EnhancedCalendar = ({ family }) => {
           ))}
         </div>
         
-        {/* Calendar grid */}
         <div className="grid grid-cols-7">
           {days.map((date, index) => {
             const dayEvents = date ? getEventsForDate(date) : []
@@ -418,11 +411,9 @@ const EnhancedCalendar = ({ family }) => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Family Calendar</h2>
         <div className="flex space-x-2">
-          {/* View Mode Selector */}
           <div className="bg-white rounded-lg shadow p-1 flex">
             <button
               onClick={() => setViewMode('month')}
@@ -476,11 +467,9 @@ const EnhancedCalendar = ({ family }) => {
         </div>
       </div>
 
-      {/* Calendar Views */}
       {viewMode === 'month' && <MonthView />}
       {viewMode === 'list' && <ListView />}
 
-      {/* Event Modal */}
       {showEventModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -628,7 +617,6 @@ const EnhancedCalendar = ({ family }) => {
         </div>
       )}
 
-      {/* Calendar Sync Modal */}
       {showSyncModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -666,6 +654,19 @@ const EnhancedCalendar = ({ family }) => {
                   disabled
                   className="bg-gray-400 text-white px-4 py-2 rounded cursor-not-allowed"
                 >
+                  🍎 Coming Soon
+                </button>
+              </div>
+
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-2">Outlook Calendar</h4>
+                <p className="text-sm text-gray-600 mb-3">
+                  Sync with Microsoft Outlook (Coming Soon).
+                </p>
+                <button
+                  disabled
+                  className="bg-gray-400 text-white px-4 py-2 rounded cursor-not-allowed"
+                >
                   📧 Coming Soon
                 </button>
               </div>
@@ -692,17 +693,4 @@ const EnhancedCalendar = ({ family }) => {
   )
 }
 
-export default EnhancedCalendar2 rounded cursor-not-allowed"
-                >
-                  🍎 Coming Soon
-                </button>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">Outlook Calendar</h4>
-                <p className="text-sm text-gray-600 mb-3">
-                  Sync with Microsoft Outlook (Coming Soon).
-                </p>
-                <button
-                  disabled
-                  className="bg-gray-400 text-white px-4 py-
+export default EnhancedCalendar
