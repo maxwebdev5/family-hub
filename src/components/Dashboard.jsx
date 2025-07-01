@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase.js'
+import ProfilePicture from './ProfilePicture.jsx'
 
 const Dashboard = ({ family }) => {
   const [chores, setChores] = useState([])
@@ -189,7 +190,7 @@ const Dashboard = ({ family }) => {
         </div>
       </div>
 
-      {/* Family Members Overview */}
+     {/* Family Members Overview */}
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center">
           <span className="text-2xl mr-2">👥</span>
@@ -202,7 +203,9 @@ const Dashboard = ({ family }) => {
             )
             return (
               <div key={member.id} className="text-center p-4 bg-gray-50 rounded-lg">
-                <div className="text-4xl mb-2">👤</div>
+                <div className="flex justify-center mb-2">
+                  <ProfilePicture member={member} size="xlarge" />
+                </div>
                 <div className="font-medium">{member.name}</div>
                 <div className="text-sm text-gray-600">
                   {memberChores.length} pending chores
