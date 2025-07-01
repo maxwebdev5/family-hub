@@ -23,124 +23,6 @@ export const signIn = async (email, password) => {
   return { data, error }
 }
 
-// Google Calendar Integration Functions
-// Add these to your src/supabase.js file
-
-// Note: These require setting up Google Calendar API credentials
-// You'll need to create a project in Google Cloud Console and enable Calendar API
-
-export const initiateGoogleCalendarSync = async (familyId) => {
-  try {
-    // This would redirect to Google OAuth
-    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${import.meta.env.VITE_GOOGLE_CLIENT_ID}&` +
-      `redirect_uri=${window.location.origin}/auth/google&` +
-      `response_type=code&` +
-      `scope=https://www.googleapis.com/auth/calendar.readonly&` +
-      `state=${familyId}`
-    
-    window.location.href = googleAuthUrl
-  } catch (error) {
-    console.error('Error initiating Google Calendar sync:', error)
-    throw error
-  }
-}
-
-export const syncGoogleCalendarEvents = async (familyId, accessToken) => {
-  try {
-    // Fetch events from Google Calendar
-    const response = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-      `timeMin=${new Date().toISOString()}&` +
-      `maxResults=50&` +
-      `singleEvents=true&` +
-      `orderBy=startTime`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    )
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch Google Calendar events')
-    }
-
-    const data = await response.json()
-    const events = data.items || []
-
-    // Convert Google Calendar events to our format
-    const familyHubEvents = events.map(event => ({
-      family_id: familyId,
-      title: event.summary || 'No Title',
-      event_date: event.start.date || event.start.dateTime?.split('T')[0],
-      event_time: event.start.dateTime ? 
-        new Date(event.start.dateTime).toTimeString().slice(0, 5) : null,
-      end_date: event.end.date || event.end.dateTime?.split('T')[0],
-      end_time: event.end.dateTime ? 
-        new Date(event.end.dateTime).toTimeString().slice(0, 5) : null,
-      description: event.description || '',
-      location: event.location || '',
-      all_day: !!event.start.date, // Google uses 'date' for all-day events
-      color: '#4285f4', // Google blue
-      external_id: event.id,
-      external_source: 'google',
-      sync_status: 'synced'
-    }))
-
-    // Insert or update events in our database
-    const { data: insertedEvents, error } = await supabase
-      .from('calendar_events')
-      .upsert(
-        familyHubEvents,
-        { 
-          onConflict: 'external_id,family_id',
-          ignoreDuplicates: false 
-        }
-      )
-      .select()
-
-    if (error) throw error
-
-    // Update sync settings
-    await supabase
-      .from('calendar_sync_settings')
-      .update({ 
-        last_sync_at: new Date().toISOString(),
-        google_calendar_enabled: true 
-      })
-      .eq('family_id', familyId)
-
-    return { success: true, eventCount: familyHubEvents.length }
-
-  } catch (error) {
-    console.error('Error syncing Google Calendar events:', error)
-    throw error
-  }
-}
-
-// Apple Calendar integration (CalDAV)
-export const syncAppleCalendarEvents = async (familyId, username, password) => {
-  try {
-    // This would require CalDAV integration
-    // Apple Calendar uses CalDAV protocol for syncing
-    
-    const calDAVUrl = `https://caldav.icloud.com/${username}/calendars/`
-    
-    // Note: This is a simplified example
-    // Real implementation would need proper CalDAV library
-    
-    console.log('Apple Calendar sync would be implemented here')
-    alert('Apple Calendar sync requires CalDAV implementation')
-    
-    return { success: false, message: 'Not implemented yet' }
-    
-  } catch (error) {
-    console.error('Error syncing Apple Calendar:', error)
-    throw error
-  }
-}
 export const signOut = async () => {
   const { error } = await supabase.auth.signOut()
   return { error }
@@ -265,5 +147,338 @@ export const joinFamily = async (inviteCode, memberName) => {
   } catch (err) {
     console.error('Join family catch error:', err)
     return { data: null, error: err }
+  }
+}
+
+// ============================================================================
+// GOOGLE CALENDAR INTEGRATION FUNCTIONS
+// ============================================================================
+
+export const initiateGoogleCalendarAuth = () => {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+  
+  if (!clientId) {
+    throw new Error('Google Client ID not configured. Please add VITE_GOOGLE_CLIENT_ID to environment variables.')
+  }
+  
+  const redirectUri = `${window.location.origin}/auth/google`
+  const scope = 'https://www.googleapis.com/auth/calendar.readonly'
+  
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${clientId}&` +
+    `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+    `response_type=code&` +
+    `scope=${encodeURIComponent(scope)}&` +
+    `access_type=offline&` +
+    `prompt=consent`
+    
+  console.log('Redirecting to Google OAuth:', authUrl)
+  window.location.href = authUrl
+}
+
+export const handleGoogleAuthCallback = async (code, familyId) => {
+  try {
+    console.log('Handling Google auth callback with code:', code)
+    
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+    const redirectUri = `${window.location.origin}/auth/google`
+    
+    // Exchange code for access token
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        code: code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri
+        // Note: client_secret should be handled by backend for security
+        // For demo purposes, we're using the public flow
+      })
+    })
+
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.text()
+      console.error('Token exchange failed:', errorData)
+      throw new Error(`Failed to exchange code for token: ${tokenResponse.status}`)
+    }
+
+    const tokens = await tokenResponse.json()
+    console.log('Received tokens from Google')
+    
+    // Store tokens in calendar sync settings
+    const { error } = await supabase
+      .from('calendar_sync_settings')
+      .update({
+        google_calendar_enabled: true,
+        google_access_token: tokens.access_token,
+        google_refresh_token: tokens.refresh_token || null,
+        last_sync_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('family_id', familyId)
+
+    if (error) {
+      console.error('Error saving tokens:', error)
+      throw error
+    }
+
+    return { success: true, tokens }
+  } catch (error) {
+    console.error('Error handling Google auth callback:', error)
+    throw error
+  }
+}
+
+export const syncGoogleCalendarEvents = async (familyId) => {
+  try {
+    console.log('Starting Google Calendar sync for family:', familyId)
+    
+    // Get stored access token
+    const { data: syncSettings, error: settingsError } = await supabase
+      .from('calendar_sync_settings')
+      .select('*')
+      .eq('family_id', familyId)
+      .single()
+
+    if (settingsError) {
+      console.error('Error fetching sync settings:', settingsError)
+      throw new Error('Could not fetch sync settings')
+    }
+
+    if (!syncSettings?.google_access_token) {
+      throw new Error('No Google Calendar access token found. Please reconnect your Google Calendar.')
+    }
+
+    console.log('Found access token, fetching Google Calendar events...')
+
+    // Fetch events from Google Calendar
+    const now = new Date()
+    const oneMonthFromNow = new Date()
+    oneMonthFromNow.setMonth(now.getMonth() + 1)
+
+    const eventsResponse = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+      `timeMin=${now.toISOString()}&` +
+      `timeMax=${oneMonthFromNow.toISOString()}&` +
+      `maxResults=50&` +
+      `singleEvents=true&` +
+      `orderBy=startTime`,
+      {
+        headers: {
+          'Authorization': `Bearer ${syncSettings.google_access_token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (eventsResponse.status === 401) {
+      console.log('Access token expired, attempting to refresh...')
+      // Token expired, try to refresh
+      if (syncSettings.google_refresh_token) {
+        const refreshed = await refreshGoogleToken(familyId, syncSettings.google_refresh_token)
+        if (refreshed) {
+          console.log('Token refreshed, retrying sync...')
+          // Retry with new token
+          return syncGoogleCalendarEvents(familyId)
+        }
+      }
+      throw new Error('Google Calendar access expired. Please reconnect your account.')
+    }
+
+    if (!eventsResponse.ok) {
+      const errorText = await eventsResponse.text()
+      console.error('Google Calendar API error:', errorText)
+      throw new Error(`Google Calendar API error: ${eventsResponse.status}`)
+    }
+
+    const data = await eventsResponse.json()
+    const events = data.items || []
+    
+    console.log(`Found ${events.length} events from Google Calendar`)
+
+    // Convert Google Calendar events to our format
+    const familyHubEvents = events.map(event => {
+      // Handle different date/time formats from Google
+      let eventDate, eventTime, endDate, endTime, allDay
+      
+      if (event.start.date) {
+        // All-day event
+        eventDate = event.start.date
+        endDate = event.end.date
+        eventTime = null
+        endTime = null
+        allDay = true
+      } else if (event.start.dateTime) {
+        // Timed event
+        const startDateTime = new Date(event.start.dateTime)
+        const endDateTime = new Date(event.end.dateTime)
+        
+        eventDate = startDateTime.toISOString().split('T')[0]
+        eventTime = startDateTime.toTimeString().slice(0, 5)
+        endDate = endDateTime.toISOString().split('T')[0]
+        endTime = endDateTime.toTimeString().slice(0, 5)
+        allDay = false
+      }
+
+      return {
+        family_id: familyId,
+        title: event.summary || 'Untitled Event',
+        event_date: eventDate,
+        event_time: eventTime,
+        end_date: endDate,
+        end_time: endTime,
+        description: event.description || '',
+        location: event.location || '',
+        all_day: allDay,
+        color: '#4285f4', // Google blue
+        external_id: event.id,
+        external_source: 'google',
+        sync_status: 'synced'
+      }
+    }).filter(event => event.event_date) // Filter out events without valid dates
+
+    console.log(`Converted ${familyHubEvents.length} events to Family Hub format`)
+
+    // Insert or update events in our database
+    let insertedCount = 0
+    for (const event of familyHubEvents) {
+      try {
+        const { error } = await supabase
+          .from('calendar_events')
+          .upsert(event, { 
+            onConflict: 'external_id,family_id',
+            ignoreDuplicates: false 
+          })
+
+        if (!error) {
+          insertedCount++
+        } else {
+          console.error('Error upserting event:', error, event)
+        }
+      } catch (eventError) {
+        console.error('Error processing event:', eventError, event)
+      }
+    }
+
+    // Update sync timestamp
+    await supabase
+      .from('calendar_sync_settings')
+      .update({ 
+        last_sync_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('family_id', familyId)
+
+    console.log(`Successfully synced ${insertedCount} events`)
+
+    return { 
+      success: true, 
+      eventCount: insertedCount,
+      totalFound: events.length,
+      message: `Successfully synced ${insertedCount} events from Google Calendar`
+    }
+
+  } catch (error) {
+    console.error('Error syncing Google Calendar events:', error)
+    throw error
+  }
+}
+
+const refreshGoogleToken = async (familyId, refreshToken) => {
+  try {
+    console.log('Attempting to refresh Google token...')
+    
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+    
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      })
+    })
+
+    if (!response.ok) {
+      console.error('Token refresh failed:', response.status)
+      return false
+    }
+
+    const tokens = await response.json()
+    console.log('Token refreshed successfully')
+    
+    // Update the access token (and refresh token if provided)
+    const updateData = {
+      google_access_token: tokens.access_token,
+      updated_at: new Date().toISOString()
+    }
+    
+    if (tokens.refresh_token) {
+      updateData.google_refresh_token = tokens.refresh_token
+    }
+
+    await supabase
+      .from('calendar_sync_settings')
+      .update(updateData)
+      .eq('family_id', familyId)
+
+    return true
+  } catch (error) {
+    console.error('Error refreshing Google token:', error)
+    return false
+  }
+}
+
+// Disconnect Google Calendar
+export const disconnectGoogleCalendar = async (familyId) => {
+  try {
+    // Clear Google Calendar tokens and settings
+    const { error } = await supabase
+      .from('calendar_sync_settings')
+      .update({
+        google_calendar_enabled: false,
+        google_access_token: null,
+        google_refresh_token: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('family_id', familyId)
+
+    if (error) throw error
+
+    // Optionally remove Google Calendar events
+    await supabase
+      .from('calendar_events')
+      .delete()
+      .eq('family_id', familyId)
+      .eq('external_source', 'google')
+
+    return { success: true }
+  } catch (error) {
+    console.error('Error disconnecting Google Calendar:', error)
+    throw error
+  }
+}
+
+// Check if Google Calendar is connected
+export const isGoogleCalendarConnected = async (familyId) => {
+  try {
+    const { data, error } = await supabase
+      .from('calendar_sync_settings')
+      .select('google_calendar_enabled, google_access_token, last_sync_at')
+      .eq('family_id', familyId)
+      .single()
+
+    if (error) return false
+
+    return !!(data?.google_calendar_enabled && data?.google_access_token)
+  } catch (error) {
+    console.error('Error checking Google Calendar connection:', error)
+    return false
   }
 }
