@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabase.js'
+import ProfilePicture from './ProfilePicture.jsx'
 
 const FamilySettings = ({ family }) => {
   const [familyMembers, setFamilyMembers] = useState([])
@@ -216,9 +217,16 @@ const FamilySettings = ({ family }) => {
           {familyMembers.map(member => (
             <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
               <div className="flex items-center space-x-4">
-                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
-                  👤
-                </div>
+                <ProfilePicture 
+                  member={member} 
+                  size="large" 
+                  editable={true}
+                  onUpdate={(updatedMember) => {
+                    setFamilyMembers(familyMembers.map(m => 
+                      m.id === updatedMember.id ? updatedMember : m
+                    ))
+                  }}
+                />
                 <div>
                   <div className="font-medium">{member.name}</div>
                   <div className="flex items-center space-x-2">
@@ -232,6 +240,16 @@ const FamilySettings = ({ family }) => {
                   <div className="text-sm text-gray-500">
                     {rolePermissions[member.role]}
                   </div>
+                  {member.date_of_birth && (
+                    <div className="text-xs text-gray-400">
+                      Born: {new Date(member.date_of_birth).toLocaleDateString()}
+                    </div>
+                  )}
+                  {member.phone && (
+                    <div className="text-xs text-gray-400">
+                      📞 {member.phone}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex space-x-2">
