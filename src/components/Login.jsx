@@ -1,129 +1,272 @@
-import React, { useState, useEffect } from 'react'
-import { supabase, signOut, getUserFamily } from './supabase.js'
-import Login from './components/Login.jsx'
-import Dashboard from './components/Dashboard.jsx'
-import Chores from './components/Chores.jsx'
-import MealPlan from './components/MealPlan.jsx'
-import Calendar from './components/Calendar.jsx'
-import Navigation from './components/Navigation.jsx'
+import React, { useState } from 'react'
+import { signUp, signIn, createFamily, joinFamily } from '../supabase.js'
 
-function App() {
-  const [user, setUser] = useState(null)
-  const [family, setFamily] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('dashboard')
+const Login = ({ onFamilyCreated }) => {
+  const [mode, setMode] = useState('signin') // 'signin', 'signup', 'create-family', 'join-family'
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [familyName, setFamilyName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        loadUserFamily()
-      } else {
-        setLoading(false)
-      }
-    })
+  const handleSignIn = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        loadUserFamily()
-      } else {
-        setFamily(null)
-        setLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  const loadUserFamily = async () => {
-    try {
-      const { data, error } = await getUserFamily()
-      if (error) {
-        console.error('Error loading family:', error)
-      } else {
-        setFamily(data)
-      }
-    } catch (err) {
-      console.error('Error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleSignOut = async () => {
-    const { error } = await signOut()
+    const { data, error } = await signIn(email, password)
     if (error) {
-      console.error('Error signing out:', error)
+      setError(error.message)
     }
+    setLoading(false)
   }
 
-  const handleFamilyCreated = () => {
-    loadUserFamily()
+  const handleSignUp = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    const { data, error } = await signUp(email, password)
+    if (error) {
+      setError(error.message)
+    } else {
+      setMode('create-family')
+    }
+    setLoading(false)
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4">🏠</div>
-          <div className="text-xl font-semibold text-gray-700">Loading Family Hub...</div>
-        </div>
-      </div>
-    )
+  const handleCreateFamily = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    const { data, error } = await createFamily(familyName, name)
+    if (error) {
+      setError(error.message)
+    } else {
+      onFamilyCreated()
+    }
+    setLoading(false)
   }
 
-  if (!user) {
-    return <Login onFamilyCreated={handleFamilyCreated} />
-  }
+  const handleJoinFamily = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
 
-  if (!family) {
-    return <Login onFamilyCreated={handleFamilyCreated} />
+    const { data, error } = await joinFamily(inviteCode, name)
+    if (error) {
+      setError(error.message)
+    } else {
+      onFamilyCreated()
+    }
+    setLoading(false)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-2xl font-bold text-gray-900">🏠 {family.families.name}</h1>
-              <div className="text-sm text-gray-600">
-                Welcome, {family.name}
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <div className="max-w-md w-full">
+        <div className="bg-white rounded-lg shadow-xl p-8">
+          <div className="text-center mb-8">
+            <div className="text-6xl mb-4">🏠</div>
+            <h1 className="text-3xl font-bold text-gray-900">Family Hub</h1>
+            <p className="text-gray-600 mt-2">Organize your family life</p>
+          </div>
+
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+              {error}
             </div>
-            <div className="flex items-center space-x-4">
-              <div className="text-sm text-gray-600">
-                Invite Code: <span className="font-mono bg-gray-100 px-2 py-1 rounded">{family.families.invite_code}</span>
+          )}
+
+          {/* Sign In Form */}
+          {mode === 'signin' && (
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter your email"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter your password"
+                  required
+                />
               </div>
               <button
-                onClick={handleSignOut}
-                className="bg-red-100 text-red-700 px-3 py-1 rounded-lg text-sm hover:bg-red-200"
+                type="submit"
+                disabled={loading}
+                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
               >
-                Sign Out
+                {loading ? 'Signing In...' : 'Sign In'}
               </button>
+              <div className="text-center mt-4">
+                <button
+                  type="button"
+                  onClick={() => setMode('signup')}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  Don't have an account? Sign up
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Sign Up Form */}
+          {mode === 'signup' && (
+            <form onSubmit={handleSignUp} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter your email"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Create a password (min 6 characters)"
+                  required
+                  minLength={6}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:opacity-50"
+              >
+                {loading ? 'Creating Account...' : 'Create Account'}
+              </button>
+              <div className="text-center mt-4">
+                <button
+                  type="button"
+                  onClick={() => setMode('signin')}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  Already have an account? Sign in
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Create Family Form */}
+          {mode === 'create-family' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-4 text-center">Create Your Family</h2>
+              <form onSubmit={handleCreateFamily} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Your Name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter your name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Family Name</label>
+                  <input
+                    type="text"
+                    value={familyName}
+                    onChange={(e) => setFamilyName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., The Smith Family"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {loading ? 'Creating Family...' : 'Create Family'}
+                </button>
+                <div className="text-center mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setMode('join-family')}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    Want to join an existing family instead?
+                  </button>
+                </div>
+              </form>
             </div>
-          </div>
+          )}
+
+          {/* Join Family Form */}
+          {mode === 'join-family' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-4 text-center">Join a Family</h2>
+              <form onSubmit={handleJoinFamily} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Your Name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter your name"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Family Invite Code</label>
+                  <input
+                    type="text"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter the family invite code"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  {loading ? 'Joining Family...' : 'Join Family'}
+                </button>
+                <div className="text-center mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setMode('create-family')}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    Want to create a new family instead?
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
         </div>
-      </header>
-
-      {/* Navigation */}
-      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'dashboard' && <Dashboard family={family} />}
-        {activeTab === 'chores' && <Chores family={family} />}
-        {activeTab === 'meals' && <MealPlan family={family} />}
-        {activeTab === 'calendar' && <Calendar family={family} />}
-      </main>
+      </div>
     </div>
   )
 }
 
-export default App
+export default Login
