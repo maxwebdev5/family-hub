@@ -76,3 +76,22 @@ export const joinFamily = async (inviteCode, memberName) => {
     return { data: null, error: err }
   }
 }
+
+export const getUserFamily = async () => {
+  const { data, error } = await supabase
+    .from('family_members')
+    .select(`
+      id,
+      name,
+      role,
+      family_id,
+      families!inner(
+        id,
+        name,
+        invite_code
+      )
+    `)
+    .single()
+  
+  return { data, error }
+}
