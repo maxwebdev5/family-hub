@@ -23,6 +23,124 @@ export const signIn = async (email, password) => {
   return { data, error }
 }
 
+// Google Calendar Integration Functions
+// Add these to your src/supabase.js file
+
+// Note: These require setting up Google Calendar API credentials
+// You'll need to create a project in Google Cloud Console and enable Calendar API
+
+export const initiateGoogleCalendarSync = async (familyId) => {
+  try {
+    // This would redirect to Google OAuth
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${import.meta.env.VITE_GOOGLE_CLIENT_ID}&` +
+      `redirect_uri=${window.location.origin}/auth/google&` +
+      `response_type=code&` +
+      `scope=https://www.googleapis.com/auth/calendar.readonly&` +
+      `state=${familyId}`
+    
+    window.location.href = googleAuthUrl
+  } catch (error) {
+    console.error('Error initiating Google Calendar sync:', error)
+    throw error
+  }
+}
+
+export const syncGoogleCalendarEvents = async (familyId, accessToken) => {
+  try {
+    // Fetch events from Google Calendar
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+      `timeMin=${new Date().toISOString()}&` +
+      `maxResults=50&` +
+      `singleEvents=true&` +
+      `orderBy=startTime`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch Google Calendar events')
+    }
+
+    const data = await response.json()
+    const events = data.items || []
+
+    // Convert Google Calendar events to our format
+    const familyHubEvents = events.map(event => ({
+      family_id: familyId,
+      title: event.summary || 'No Title',
+      event_date: event.start.date || event.start.dateTime?.split('T')[0],
+      event_time: event.start.dateTime ? 
+        new Date(event.start.dateTime).toTimeString().slice(0, 5) : null,
+      end_date: event.end.date || event.end.dateTime?.split('T')[0],
+      end_time: event.end.dateTime ? 
+        new Date(event.end.dateTime).toTimeString().slice(0, 5) : null,
+      description: event.description || '',
+      location: event.location || '',
+      all_day: !!event.start.date, // Google uses 'date' for all-day events
+      color: '#4285f4', // Google blue
+      external_id: event.id,
+      external_source: 'google',
+      sync_status: 'synced'
+    }))
+
+    // Insert or update events in our database
+    const { data: insertedEvents, error } = await supabase
+      .from('calendar_events')
+      .upsert(
+        familyHubEvents,
+        { 
+          onConflict: 'external_id,family_id',
+          ignoreDuplicates: false 
+        }
+      )
+      .select()
+
+    if (error) throw error
+
+    // Update sync settings
+    await supabase
+      .from('calendar_sync_settings')
+      .update({ 
+        last_sync_at: new Date().toISOString(),
+        google_calendar_enabled: true 
+      })
+      .eq('family_id', familyId)
+
+    return { success: true, eventCount: familyHubEvents.length }
+
+  } catch (error) {
+    console.error('Error syncing Google Calendar events:', error)
+    throw error
+  }
+}
+
+// Apple Calendar integration (CalDAV)
+export const syncAppleCalendarEvents = async (familyId, username, password) => {
+  try {
+    // This would require CalDAV integration
+    // Apple Calendar uses CalDAV protocol for syncing
+    
+    const calDAVUrl = `https://caldav.icloud.com/${username}/calendars/`
+    
+    // Note: This is a simplified example
+    // Real implementation would need proper CalDAV library
+    
+    console.log('Apple Calendar sync would be implemented here')
+    alert('Apple Calendar sync requires CalDAV implementation')
+    
+    return { success: false, message: 'Not implemented yet' }
+    
+  } catch (error) {
+    console.error('Error syncing Apple Calendar:', error)
+    throw error
+  }
+}
 export const signOut = async () => {
   const { error } = await supabase.auth.signOut()
   return { error }
