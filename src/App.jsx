@@ -4,9 +4,8 @@ import Login from './components/Login.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import Chores from './components/Chores.jsx'
 import MealPlan from './components/MealPlan.jsx'
-import Calendar from './components/Calendar.jsx'
+import EnhancedCalendar from './components/EnhancedCalendar.jsx'
 import FamilySettings from './components/FamilySettings.jsx'
-import Navigation from './components/Navigation.jsx'
 
 function App() {
   const [user, setUser] = useState(null)
@@ -145,7 +144,7 @@ function App() {
         {activeTab === 'dashboard' && <Dashboard family={family} />}
         {activeTab === 'chores' && <Chores family={family} />}
         {activeTab === 'meals' && <MealPlan family={family} />}
-        {activeTab === 'calendar' && <Calendar family={family} />}
+        {activeTab === 'calendar' && <EnhancedCalendar family={family} />}
         {activeTab === 'settings' && <FamilySettings family={family} />}
       </main>
     </div>
