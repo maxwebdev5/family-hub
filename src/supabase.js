@@ -154,6 +154,50 @@ export const joinFamily = async (inviteCode, memberName) => {
 // GOOGLE CALENDAR INTEGRATION FUNCTIONS
 // ============================================================================
 
+// Initialize calendar sync settings for a family
+export const initializeCalendarSyncSettings = async (familyId) => {
+  try {
+    console.log('Initializing calendar sync settings for family:', familyId)
+    
+    const { data, error } = await supabase
+      .from('calendar_sync_settings')
+      .select('id')
+      .eq('family_id', familyId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error checking sync settings:', error)
+      throw error
+    }
+
+    if (!data) {
+      // Settings don't exist, create them
+      const { error: insertError } = await supabase
+        .from('calendar_sync_settings')
+        .insert({
+          family_id: familyId,
+          google_calendar_enabled: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+
+      if (insertError) {
+        console.error('Error creating sync settings:', insertError)
+        throw insertError
+      }
+      
+      console.log('Created new calendar sync settings for family:', familyId)
+    } else {
+      console.log('Calendar sync settings already exist for family:', familyId)
+    }
+    
+    return true
+  } catch (error) {
+    console.error('Error initializing calendar sync settings:', error)
+    throw error
+  }
+}
+
 export const initiateGoogleCalendarAuth = () => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   
@@ -175,8 +219,6 @@ export const initiateGoogleCalendarAuth = () => {
   console.log('Redirecting to Google OAuth:', authUrl)
   window.location.href = authUrl
 }
-
-// Replace the handleGoogleAuthCallback function in src/supabase.js with this:
 
 export const handleGoogleAuthCallback = async (code, familyId) => {
   try {
@@ -204,6 +246,9 @@ export const handleGoogleAuthCallback = async (code, familyId) => {
 
     const tokens = await tokenResponse.json()
     console.log('Received tokens from Google via Netlify function')
+    
+    // Ensure sync settings exist first
+    await initializeCalendarSyncSettings(familyId)
     
     // Store tokens in calendar sync settings
     const { error } = await supabase
@@ -433,8 +478,6 @@ export const syncGoogleCalendarEvents = async (familyId) => {
   }
 }
 
-// Replace the refreshGoogleToken function in src/supabase.js with this:
-
 const refreshGoogleToken = async (familyId, refreshToken) => {
   try {
     console.log('Attempting to refresh Google token...')
@@ -518,46 +561,16 @@ export const isGoogleCalendarConnected = async (familyId) => {
       .from('calendar_sync_settings')
       .select('google_calendar_enabled, google_access_token, last_sync_at')
       .eq('family_id', familyId)
-      .single()
+      .maybeSingle()
 
-    if (error) return false
+    if (error) {
+      console.error('Error checking Google Calendar connection:', error)
+      return false
+    }
 
     return !!(data?.google_calendar_enabled && data?.google_access_token)
   } catch (error) {
     console.error('Error checking Google Calendar connection:', error)
     return false
-  }
-}
-
-// Add this to your supabase.js file
-export const initializeCalendarSyncSettings = async (familyId) => {
-  try {
-    const { data, error } = await supabase
-      .from('calendar_sync_settings')
-      .select('id')
-      .eq('family_id', familyId)
-      .single()
-
-    if (error && error.code === 'PGRST116') {
-      // Settings don't exist, create them
-      const { error: insertError } = await supabase
-        .from('calendar_sync_settings')
-        .insert({
-          family_id: familyId,
-          google_calendar_enabled: false
-        })
-
-      if (insertError) {
-        console.error('Error creating sync settings:', insertError)
-        throw insertError
-      }
-      
-      console.log('Created new calendar sync settings for family:', familyId)
-    }
-    
-    return true
-  } catch (error) {
-    console.error('Error initializing calendar sync settings:', error)
-    throw error
   }
 }
