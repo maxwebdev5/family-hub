@@ -202,10 +202,11 @@ export const initiateGoogleCalendarAuth = () => {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   
   if (!clientId) {
-    throw new Error('Google Client ID not configured. Please add VITE_GOOGLE_CLIENT_ID to environment variables.')
+    throw new Error('Google Client ID not configured.')
   }
   
-  const redirectUri = `${window.location.origin}/auth/google`
+  // Fix: Use the base URL without /auth/google
+  const redirectUri = window.location.origin
   const scope = 'https://www.googleapis.com/auth/calendar.readonly'
   
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -216,62 +217,9 @@ export const initiateGoogleCalendarAuth = () => {
     `access_type=offline&` +
     `prompt=consent`
     
-  console.log('Redirecting to Google OAuth:', authUrl)
+  console.log('Auth URL:', authUrl)
+  console.log('Redirect URI:', redirectUri)
   window.location.href = authUrl
-}
-
-export const handleGoogleAuthCallback = async (code, familyId) => {
-  try {
-    console.log('Handling Google auth callback with code:', code)
-    
-    const redirectUri = `${window.location.origin}/auth/google`
-    
-    // Use our Netlify function for secure token exchange
-    const tokenResponse = await fetch('/.netlify/functions/google-auth', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        code: code,
-        redirectUri: redirectUri
-      })
-    })
-
-    if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json()
-      console.error('Token exchange failed:', errorData)
-      throw new Error(`Failed to exchange code for token: ${errorData.error} - ${errorData.details || ''}`)
-    }
-
-    const tokens = await tokenResponse.json()
-    console.log('Received tokens from Google via Netlify function')
-    
-    // Ensure sync settings exist first
-    await initializeCalendarSyncSettings(familyId)
-    
-    // Store tokens in calendar sync settings
-    const { error } = await supabase
-      .from('calendar_sync_settings')
-      .update({
-        google_calendar_enabled: true,
-        google_access_token: tokens.access_token,
-        google_refresh_token: tokens.refresh_token || null,
-        last_sync_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('family_id', familyId)
-
-    if (error) {
-      console.error('Error saving tokens:', error)
-      throw error
-    }
-
-    return { success: true, tokens }
-  } catch (error) {
-    console.error('Error handling Google auth callback:', error)
-    throw error
-  }
 }
 
 export const syncGoogleCalendarEvents = async (familyId) => {
