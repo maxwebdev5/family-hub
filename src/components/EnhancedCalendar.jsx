@@ -46,13 +46,16 @@ const EnhancedCalendar = ({ family }) => {
     }
   }, [])
 
-  useEffect(() => {
-    if (family) {
-      loadEvents()
-      loadSyncSettings()
-      checkGoogleConnection()
-    }
-  }, [family, currentDate])
+    // Add this to the useEffect in EnhancedCalendar.jsx
+useEffect(() => {
+  if (family) {
+    loadEvents()
+    loadSyncSettings()
+    checkGoogleConnection()
+    // Initialize sync settings if they don't exist
+    initializeCalendarSyncSettings(family.family_id).catch(console.error)
+  }
+}, [family, currentDate])
 
   const loadEvents = async () => {
     try {
@@ -285,7 +288,7 @@ const EnhancedCalendar = ({ family }) => {
   const goToToday = () => {
     setCurrentDate(new Date())
   }
-
+  
   const MonthView = () => {
     const days = getDaysInMonth()
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
