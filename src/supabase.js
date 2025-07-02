@@ -479,3 +479,36 @@ export const isGoogleCalendarConnected = async (familyId) => {
     return false
   }
 }
+
+// Add this to your supabase.js file
+export const initializeCalendarSyncSettings = async (familyId) => {
+  try {
+    const { data, error } = await supabase
+      .from('calendar_sync_settings')
+      .select('id')
+      .eq('family_id', familyId)
+      .single()
+
+    if (error && error.code === 'PGRST116') {
+      // Settings don't exist, create them
+      const { error: insertError } = await supabase
+        .from('calendar_sync_settings')
+        .insert({
+          family_id: familyId,
+          google_calendar_enabled: false
+        })
+
+      if (insertError) {
+        console.error('Error creating sync settings:', insertError)
+        throw insertError
+      }
+      
+      console.log('Created new calendar sync settings for family:', familyId)
+    }
+    
+    return true
+  } catch (error) {
+    console.error('Error initializing calendar sync settings:', error)
+    throw error
+  }
+}
