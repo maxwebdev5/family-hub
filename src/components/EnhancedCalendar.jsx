@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { supabase, initiateGoogleCalendarAuth, syncGoogleCalendarEvents, disconnectGoogleCalendar, isGoogleCalendarConnected } from '../supabase.js'
+import { supabase, initiateGoogleCalendarAuth, syncGoogleCalendarEvents, disconnectGoogleCalendar, isGoogleCalendarConnected, initializeCalendarSyncSettings } from '../supabase.js'
 import GoogleAuthCallback from './GoogleAuthCallback.jsx'
 
 const EnhancedCalendar = ({ family }) => {
@@ -15,6 +15,7 @@ const EnhancedCalendar = ({ family }) => {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [googleConnected, setGoogleConnected] = useState(false)
+  const [error, setError] = useState(null)
   const [eventForm, setEventForm] = useState({
     title: '',
     event_date: '',
@@ -40,25 +41,56 @@ const EnhancedCalendar = ({ family }) => {
 
   // Detect Google auth callback
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search)
-    if (urlParams.get('code') || urlParams.get('error')) {
-      setShowGoogleCallback(true)
+    try {
+      const urlParams = new URLSearchParams(window.location.search)
+      if (urlParams.get('code') || urlParams.get('error')) {
+        setShowGoogleCallback(true)
+      }
+    } catch (err) {
+      console.error('Error checking URL params:', err)
     }
   }, [])
 
-    // Add this to the useEffect in EnhancedCalendar.jsx
-useEffect(() => {
-  if (family) {
-    loadEvents()
-    loadSyncSettings()
-    checkGoogleConnection()
-    // Initialize sync settings if they don't exist
-    initializeCalendarSyncSettings(family.family_id).catch(console.error)
+  useEffect(() => {
+    if (family?.family_id) {
+      console.log('Family data available, initializing calendar...')
+      initializeCalendar()
+    }
+  }, [family])
+
+  useEffect(() => {
+    if (family?.family_id && !loading) {
+      loadEvents()
+    }
+  }, [family, currentDate, loading])
+
+  const initializeCalendar = async () => {
+    try {
+      setError(null)
+      console.log('Initializing calendar for family:', family.family_id)
+      
+      // Initialize sync settings if they don't exist
+      if (typeof initializeCalendarSyncSettings === 'function') {
+        await initializeCalendarSyncSettings(family.family_id)
+      }
+      
+      await Promise.all([
+        loadSyncSettings(),
+        checkGoogleConnection()
+      ])
+      
+      setLoading(false)
+    } catch (error) {
+      console.error('Error initializing calendar:', error)
+      setError('Failed to initialize calendar: ' + error.message)
+      setLoading(false)
+    }
   }
-}, [family, currentDate])
 
   const loadEvents = async () => {
     try {
+      console.log('Loading events for family:', family.family_id)
+      
       // Get events for current month view
       const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
       const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
@@ -71,34 +103,52 @@ useEffect(() => {
         .lte('event_date', endOfMonth.toISOString().split('T')[0])
         .order('event_date', { ascending: true })
 
-      if (error) throw error
-      setEvents(data || [])
+      if (error) {
+        console.error('Error loading events:', error)
+        // Don't throw here, just log and continue
+        setEvents([])
+      } else {
+        console.log('Loaded events:', data?.length || 0)
+        setEvents(data || [])
+      }
     } catch (error) {
       console.error('Error loading events:', error)
-    } finally {
-      setLoading(false)
+      setEvents([])
     }
   }
 
   const loadSyncSettings = async () => {
     try {
+      console.log('Loading sync settings for family:', family.family_id)
+      
       const { data, error } = await supabase
         .from('calendar_sync_settings')
         .select('*')
         .eq('family_id', family.family_id)
-        .single()
+        .maybeSingle() // Use maybeSingle instead of single to avoid errors when no record exists
 
-      if (error && error.code !== 'PGRST116') throw error
-      setSyncSettings(data)
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading sync settings:', error)
+      } else {
+        console.log('Sync settings loaded:', data)
+        setSyncSettings(data)
+      }
     } catch (error) {
       console.error('Error loading sync settings:', error)
+      setSyncSettings(null)
     }
   }
 
   const checkGoogleConnection = async () => {
     try {
-      const connected = await isGoogleCalendarConnected(family.family_id)
-      setGoogleConnected(connected)
+      if (typeof isGoogleCalendarConnected === 'function') {
+        const connected = await isGoogleCalendarConnected(family.family_id)
+        console.log('Google Calendar connected:', connected)
+        setGoogleConnected(connected)
+      } else {
+        console.warn('isGoogleCalendarConnected function not available')
+        setGoogleConnected(false)
+      }
     } catch (error) {
       console.error('Error checking Google connection:', error)
       setGoogleConnected(false)
@@ -186,7 +236,11 @@ useEffect(() => {
     if (!googleConnected) {
       // First time setup - initiate OAuth
       try {
-        initiateGoogleCalendarAuth()
+        if (typeof initiateGoogleCalendarAuth === 'function') {
+          initiateGoogleCalendarAuth()
+        } else {
+          alert('Google Calendar integration is not available')
+        }
       } catch (error) {
         console.error('Error initiating Google auth:', error)
         alert('Error: ' + error.message)
@@ -197,10 +251,14 @@ useEffect(() => {
     // Already connected - sync events
     setSyncing(true)
     try {
-      const result = await syncGoogleCalendarEvents(family.family_id)
-      alert(result.message)
-      loadEvents() // Reload events to show newly synced ones
-      loadSyncSettings() // Reload sync settings
+      if (typeof syncGoogleCalendarEvents === 'function') {
+        const result = await syncGoogleCalendarEvents(family.family_id)
+        alert(result.message)
+        loadEvents() // Reload events to show newly synced ones
+        loadSyncSettings() // Reload sync settings
+      } else {
+        alert('Google Calendar sync is not available')
+      }
     } catch (error) {
       console.error('Error syncing:', error)
       alert('Error syncing Google Calendar: ' + error.message)
@@ -212,11 +270,15 @@ useEffect(() => {
   const handleDisconnectGoogle = async () => {
     if (confirm('Are you sure you want to disconnect Google Calendar? This will remove all synced Google events.')) {
       try {
-        await disconnectGoogleCalendar(family.family_id)
-        setGoogleConnected(false)
-        loadEvents() // Reload to remove Google events
-        loadSyncSettings()
-        alert('Google Calendar disconnected successfully')
+        if (typeof disconnectGoogleCalendar === 'function') {
+          await disconnectGoogleCalendar(family.family_id)
+          setGoogleConnected(false)
+          loadEvents() // Reload to remove Google events
+          loadSyncSettings()
+          alert('Google Calendar disconnected successfully')
+        } else {
+          alert('Google Calendar disconnect is not available')
+        }
       } catch (error) {
         console.error('Error disconnecting:', error)
         alert('Error disconnecting Google Calendar: ' + error.message)
@@ -269,14 +331,19 @@ useEffect(() => {
 
   const formatTime = (timeString) => {
     if (!timeString) return ''
-    const [hours, minutes] = timeString.split(':')
-    const date = new Date()
-    date.setHours(parseInt(hours), parseInt(minutes))
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit',
-      hour12: true 
-    })
+    try {
+      const [hours, minutes] = timeString.split(':')
+      const date = new Date()
+      date.setHours(parseInt(hours), parseInt(minutes))
+      return date.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      })
+    } catch (error) {
+      console.error('Error formatting time:', error)
+      return timeString
+    }
   }
 
   const navigateMonth = (direction) => {
@@ -288,7 +355,54 @@ useEffect(() => {
   const goToToday = () => {
     setCurrentDate(new Date())
   }
-  
+
+  // Error boundary for render errors
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h2 className="text-xl font-semibold text-red-600 mb-2">Calendar Error</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={() => {
+              setError(null)
+              setLoading(true)
+              initializeCalendar()
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <div className="text-center">
+          <div className="animate-spin text-4xl mb-4">⟳</div>
+          <div className="text-lg text-gray-600">Loading calendar...</div>
+        </div>
+      </div>
+    )
+  }
+
+  // Safety check for family data
+  if (!family?.family_id) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <div className="text-center">
+          <div className="text-4xl mb-4">🏠</div>
+          <div className="text-lg text-gray-600">No family data available</div>
+        </div>
+      </div>
+    )
+  }
+
   const MonthView = () => {
     const days = getDaysInMonth()
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -358,20 +472,20 @@ useEffect(() => {
                         <div
                           key={event.id}
                           className="text-xs p-1 rounded truncate text-white cursor-pointer"
-                          style={{ backgroundColor: event.color }}
+                          style={{ backgroundColor: event.color || '#3b82f6' }}
                           onClick={(e) => {
                             e.stopPropagation()
                             setEditingEvent(event)
                             setEventForm({
-                              title: event.title,
-                              event_date: event.event_date,
+                              title: event.title || '',
+                              event_date: event.event_date || '',
                               event_time: event.event_time || '',
                               end_date: event.end_date || event.event_date,
                               end_time: event.end_time || '',
                               description: event.description || '',
                               location: event.location || '',
-                              all_day: event.all_day,
-                              color: event.color
+                              all_day: event.all_day || false,
+                              color: event.color || '#3b82f6'
                             })
                             setShowEventModal(true)
                           }}
@@ -414,7 +528,7 @@ useEffect(() => {
                   <div className="flex items-center space-x-2">
                     <div
                       className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: event.color }}
+                      style={{ backgroundColor: event.color || '#3b82f6' }}
                     />
                     <h4 className="font-medium">{event.title}</h4>
                     {event.external_source === 'google' && (
@@ -453,15 +567,15 @@ useEffect(() => {
                     onClick={() => {
                       setEditingEvent(event)
                       setEventForm({
-                        title: event.title,
-                        event_date: event.event_date,
+                        title: event.title || '',
+                        event_date: event.event_date || '',
                         event_time: event.event_time || '',
                         end_date: event.end_date || event.event_date,
                         end_time: event.end_time || '',
                         description: event.description || '',
                         location: event.location || '',
-                        all_day: event.all_day,
-                        color: event.color
+                        all_day: event.all_day || false,
+                        color: event.color || '#3b82f6'
                       })
                       setShowEventModal(true)
                     }}
@@ -487,14 +601,6 @@ useEffect(() => {
       </div>
     </div>
   )
-
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center py-12">
-        <div className="text-lg text-gray-600">Loading calendar...</div>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-6">
@@ -758,6 +864,12 @@ useEffect(() => {
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Calendar Sync</h3>
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ✕
+              </button>
             </div>
             
             <div className="space-y-4">
@@ -833,15 +945,6 @@ useEffect(() => {
                   use Google Calendar directly. Changes will sync automatically.
                 </p>
               </div>
-            </div>
-            
-            <div className="flex justify-end mt-6">
-              <button
-                onClick={() => setShowSyncModal(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>
