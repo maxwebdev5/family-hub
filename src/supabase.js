@@ -231,54 +231,68 @@ export const handleGoogleAuthCallback = async (code, familyId) => {
 
 export const syncGoogleCalendarEvents = async (familyId) => {
   try {
-    console.log('Starting Google Calendar sync for family:', familyId)
+    console.log('🔄 Starting Google Calendar sync for family:', familyId)
     
-    // Get stored access token
+    // Ensure sync settings exist
+    await initializeCalendarSyncSettings(familyId)
+    
+    // Get stored access token with better error handling
     const { data: syncSettings, error: settingsError } = await supabase
       .from('calendar_sync_settings')
       .select('*')
       .eq('family_id', familyId)
       .single()
 
+    console.log('📊 Sync settings:', {
+      found: !!syncSettings,
+      enabled: syncSettings?.google_calendar_enabled,
+      hasAccessToken: !!syncSettings?.google_access_token,
+      hasRefreshToken: !!syncSettings?.google_refresh_token,
+      lastSync: syncSettings?.last_sync_at
+    })
+
     if (settingsError) {
-      console.error('Error fetching sync settings:', settingsError)
-      throw new Error('Could not fetch sync settings')
+      console.error('❌ Error fetching sync settings:', settingsError)
+      throw new Error('Could not fetch sync settings: ' + settingsError.message)
     }
 
     if (!syncSettings?.google_access_token) {
       throw new Error('No Google Calendar access token found. Please reconnect your Google Calendar.')
     }
 
-    console.log('Found access token, fetching Google Calendar events...')
+    console.log('🔑 Found access token, fetching Google Calendar events...')
 
-    // Fetch events from Google Calendar
+    // Get broader date range for more events
     const now = new Date()
-    const oneMonthFromNow = new Date()
-    oneMonthFromNow.setMonth(now.getMonth() + 1)
+    const pastMonth = new Date()
+    pastMonth.setMonth(now.getMonth() - 1)
+    const futureMonth = new Date()
+    futureMonth.setMonth(now.getMonth() + 2)
 
-    const eventsResponse = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-      `timeMin=${now.toISOString()}&` +
-      `timeMax=${oneMonthFromNow.toISOString()}&` +
-      `maxResults=50&` +
+    const calendarUrl = `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+      `timeMin=${pastMonth.toISOString()}&` +
+      `timeMax=${futureMonth.toISOString()}&` +
+      `maxResults=100&` +
       `singleEvents=true&` +
-      `orderBy=startTime`,
-      {
-        headers: {
-          'Authorization': `Bearer ${syncSettings.google_access_token}`,
-          'Content-Type': 'application/json'
-        }
+      `orderBy=startTime`
+
+    console.log('📅 Fetching from URL:', calendarUrl)
+
+    const eventsResponse = await fetch(calendarUrl, {
+      headers: {
+        'Authorization': `Bearer ${syncSettings.google_access_token}`,
+        'Content-Type': 'application/json'
       }
-    )
+    })
+
+    console.log('📡 Google API Response Status:', eventsResponse.status)
 
     if (eventsResponse.status === 401) {
-      console.log('Access token expired, attempting to refresh...')
-      // Token expired, try to refresh
+      console.log('🔄 Access token expired, attempting to refresh...')
       if (syncSettings.google_refresh_token) {
         const refreshed = await refreshGoogleToken(familyId, syncSettings.google_refresh_token)
         if (refreshed) {
-          console.log('Token refreshed, retrying sync...')
-          // Retry with new token
+          console.log('✅ Token refreshed, retrying sync...')
           return syncGoogleCalendarEvents(familyId)
         }
       }
@@ -287,81 +301,107 @@ export const syncGoogleCalendarEvents = async (familyId) => {
 
     if (!eventsResponse.ok) {
       const errorText = await eventsResponse.text()
-      console.error('Google Calendar API error:', errorText)
-      throw new Error(`Google Calendar API error: ${eventsResponse.status}`)
+      console.error('❌ Google Calendar API error:', errorText)
+      throw new Error(`Google Calendar API error: ${eventsResponse.status} - ${errorText}`)
     }
 
     const data = await eventsResponse.json()
     const events = data.items || []
     
-    console.log(`Found ${events.length} events from Google Calendar`)
+    console.log(`📋 Found ${events.length} events from Google Calendar`)
+    console.log('📊 Sample events:', events.slice(0, 3).map(e => ({
+      id: e.id,
+      summary: e.summary,
+      start: e.start,
+      end: e.end
+    })))
 
-    // Convert Google Calendar events to our format
-    const familyHubEvents = events.map(event => {
-      // Handle different date/time formats from Google
-      let eventDate, eventTime, endDate, endTime, allDay
-      
-      if (event.start.date) {
-        // All-day event
-        eventDate = event.start.date
-        endDate = event.end.date
-        eventTime = null
-        endTime = null
-        allDay = true
-      } else if (event.start.dateTime) {
-        // Timed event
-        const startDateTime = new Date(event.start.dateTime)
-        const endDateTime = new Date(event.end.dateTime)
+    // Convert and filter events
+    const familyHubEvents = events
+      .map(event => {
+        let eventDate, eventTime, endDate, endTime, allDay
         
-        eventDate = startDateTime.toISOString().split('T')[0]
-        eventTime = startDateTime.toTimeString().slice(0, 5)
-        endDate = endDateTime.toISOString().split('T')[0]
-        endTime = endDateTime.toTimeString().slice(0, 5)
-        allDay = false
-      }
+        try {
+          if (event.start?.date) {
+            // All-day event
+            eventDate = event.start.date
+            endDate = event.end?.date || event.start.date
+            eventTime = null
+            endTime = null
+            allDay = true
+          } else if (event.start?.dateTime) {
+            // Timed event
+            const startDateTime = new Date(event.start.dateTime)
+            const endDateTime = new Date(event.end?.dateTime || event.start.dateTime)
+            
+            eventDate = startDateTime.toISOString().split('T')[0]
+            eventTime = startDateTime.toTimeString().slice(0, 5)
+            endDate = endDateTime.toISOString().split('T')[0]
+            endTime = endDateTime.toTimeString().slice(0, 5)
+            allDay = false
+          } else {
+            console.warn('⚠️ Event has no valid start time:', event)
+            return null
+          }
 
-      return {
-        family_id: familyId,
-        title: event.summary || 'Untitled Event',
-        event_date: eventDate,
-        event_time: eventTime,
-        end_date: endDate,
-        end_time: endTime,
-        description: event.description || '',
-        location: event.location || '',
-        all_day: allDay,
-        color: '#4285f4', // Google blue
-        external_id: event.id,
-        external_source: 'google',
-        sync_status: 'synced'
-      }
-    }).filter(event => event.event_date) // Filter out events without valid dates
-
-    console.log(`Converted ${familyHubEvents.length} events to Family Hub format`)
-
-    // Insert or update events in our database
-    let insertedCount = 0
-    for (const event of familyHubEvents) {
-      try {
-        const { error } = await supabase
-          .from('calendar_events')
-          .upsert(event, { 
-            onConflict: 'external_id,family_id',
-            ignoreDuplicates: false 
-          })
-
-        if (!error) {
-          insertedCount++
-        } else {
-          console.error('Error upserting event:', error, event)
+          return {
+            family_id: familyId,
+            title: event.summary || 'Untitled Event',
+            event_date: eventDate,
+            event_time: eventTime,
+            end_date: endDate,
+            end_time: endTime,
+            description: event.description || '',
+            location: event.location || '',
+            all_day: allDay,
+            color: '#4285f4',
+            external_id: event.id,
+            external_source: 'google',
+            sync_status: 'synced'
+          }
+        } catch (error) {
+          console.error('❌ Error processing event:', error, event)
+          return null
         }
-      } catch (eventError) {
-        console.error('Error processing event:', eventError, event)
+      })
+      .filter(event => event && event.event_date)
+
+    console.log(`✅ Converted ${familyHubEvents.length} valid events`)
+
+    // Clear old Google events first
+    const { error: deleteError } = await supabase
+      .from('calendar_events')
+      .delete()
+      .eq('family_id', familyId)
+      .eq('external_source', 'google')
+
+    if (deleteError) {
+      console.error('⚠️ Error clearing old Google events:', deleteError)
+    } else {
+      console.log('🧹 Cleared old Google Calendar events')
+    }
+
+    // Insert new events
+    let insertedCount = 0
+    let errorCount = 0
+    
+    if (familyHubEvents.length > 0) {
+      const { data: insertedEvents, error: insertError } = await supabase
+        .from('calendar_events')
+        .insert(familyHubEvents)
+        .select('id')
+
+      if (insertError) {
+        console.error('❌ Error inserting events:', insertError)
+        errorCount = familyHubEvents.length
+      } else {
+        insertedCount = insertedEvents?.length || 0
+        console.log(`✅ Successfully inserted ${insertedCount} events`)
       }
     }
 
     // Update sync timestamp
-    await supabase
+    const { error: updateError } = await supabase
       .from('calendar_sync_settings')
       .update({ 
         last_sync_at: new Date().toISOString(),
@@ -369,17 +409,26 @@ export const syncGoogleCalendarEvents = async (familyId) => {
       })
       .eq('family_id', familyId)
 
-    console.log(`Successfully synced ${insertedCount} events`)
+    if (updateError) {
+      console.error('⚠️ Error updating sync timestamp:', updateError)
+    }
+
+    const message = insertedCount > 0 
+      ? `Successfully synced ${insertedCount} events from Google Calendar`
+      : `Sync completed but no events were found or imported`
+
+    console.log(`🎉 ${message}`)
 
     return { 
       success: true, 
       eventCount: insertedCount,
       totalFound: events.length,
-      message: `Successfully synced ${insertedCount} events from Google Calendar`
+      errorCount,
+      message
     }
 
   } catch (error) {
-    console.error('Error syncing Google Calendar events:', error)
+    console.error('💥 Error syncing Google Calendar events:', error)
     throw error
   }
 }
