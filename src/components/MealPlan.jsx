@@ -283,65 +283,160 @@ const MealPlan = ({ family }) => {
     ))
   }
 
-  const importRecipeFromUrl = async () => {
-    if (!importForm.url) {
-      alert('Please enter a recipe URL')
-      return
+ const importRecipeFromUrl = async () => {
+  if (!importForm.url) {
+    alert('Please enter a recipe URL')
+    return
+  }
+
+  setImporting(true)
+  try {
+    console.log('Importing recipe from:', importForm.url)
+    
+    // Call our Netlify function to parse the recipe
+    const response = await fetch('/.netlify/functions/recipe-parser', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: importForm.url
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to parse recipe: ${response.status}`)
     }
 
-    setImporting(true)
-    try {
-      // Try to fetch basic page info (this is limited due to CORS)
-      // For a full implementation, you'd need a backend service to scrape recipes
+    const result = await response.json()
+    
+    if (result.success) {
+      const recipe = result.recipe
       
-      // For now, we'll extract the domain and ask user to fill in details
-      const url = new URL(importForm.url)
-      const siteName = url.hostname.replace('www.', '')
-      
+      // Auto-fill the form with parsed data
       setImportForm(prev => ({
         ...prev,
-        name: prev.name || `Recipe from ${siteName}`,
-        recipe: prev.recipe || 'Instructions will be available at the linked URL.'
+        name: recipe.name || prev.name || extractSiteNameFromUrl(prev.url),
+        ingredients: recipe.ingredients || prev.ingredients,
+        recipe: formatInstructions(recipe.instructions) || prev.recipe,
+        // Store additional metadata
+        cookTime: recipe.cookTime || '',
+        servings: recipe.servings || '',
+        author: recipe.author || '',
+        description: recipe.description || '',
+        image: recipe.image || ''
       }))
       
-      alert('Please fill in the recipe details manually. In a future update, we will add automatic recipe parsing.')
+      // Show success message
+      const sourceMsg = result.source === 'structured-data' 
+        ? 'Recipe auto-parsed successfully!' 
+        : 'Recipe parsed from webpage content!'
       
-    } catch (error) {
-      alert('Invalid URL. Please check the URL and try again.')
-    } finally {
-      setImporting(false)
+      alert(sourceMsg + ' Please review and edit as needed.')
+      
+    } else {
+      throw new Error(result.details || 'Failed to parse recipe')
     }
+    
+  } catch (error) {
+    console.error('Recipe import error:', error)
+    
+    // Fallback to manual entry
+    const siteName = extractSiteNameFromUrl(importForm.url)
+    setImportForm(prev => ({
+      ...prev,
+      name: prev.name || `Recipe from ${siteName}`,
+      recipe: prev.recipe || 'Instructions available at the linked URL.'
+    }))
+    
+    alert(`Could not auto-parse recipe (${error.message}). Please fill in the details manually.`)
+  } finally {
+    setImporting(false)
+  }
+}
+
+  // Helper function to extract site name from URL
+const extractSiteNameFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.replace('www.', '')
+  } catch {
+    return 'Unknown Site'
+  }
+}
+
+// Helper function to format instructions
+const formatInstructions = (instructions) => {
+  if (!instructions) return ''
+  
+  // If instructions are already formatted with numbers, return as-is
+  if (instructions.match(/^\d+\./m)) {
+    return instructions
+  }
+  
+  // Otherwise, split by periods or newlines and add numbers
+  const steps = instructions
+    .split(/[.\n]/)
+    .map(step => step.trim())
+    .filter(step => step.length > 10) // Filter out very short fragments
+  
+  if (steps.length > 1) {
+    return steps.map((step, index) => `${index + 1}. ${step}`).join('\n\n')
+  }
+  
+  return instructions
+}
+
+ // Enhanced save function with additional recipe metadata
+const saveImportedRecipe = async () => {
+  if (!importForm.name) {
+    alert('Please enter a recipe name')
+    return
   }
 
-  const saveImportedRecipe = async () => {
-    if (!importForm.name) {
-      alert('Please enter a recipe name')
-      return
+  try {
+    const recipeData = {
+      name: importForm.name,
+      recipe: importForm.recipe,
+      link: importForm.url,
+      ingredients: importForm.ingredients,
+      // Additional metadata (you might want to add these fields to your database)
+      cook_time: importForm.cookTime || null,
+      servings: importForm.servings || null,
+      author: importForm.author || null,
+      description: importForm.description || null
     }
 
-    try {
-      const recipeData = {
-        name: importForm.name,
-        recipe: importForm.recipe,
-        link: importForm.url,
-        ingredients: importForm.ingredients
-      }
-
-      // Save to favorites
-      await saveFavoriteRecipe(recipeData)
-      
-      // If we're editing a meal, add it there too
-      if (editingMeal) {
-        setMealForm(recipeData)
-        setShowImportModal(false)
-      } else {
-        setShowImportModal(false)
-        setImportForm({ url: '', name: '', ingredients: '', recipe: '' })
-      }
-    } catch (error) {
-      console.error('Error saving imported recipe:', error)
+    // Save to favorites
+    await saveFavoriteRecipe(recipeData)
+    
+    // If we're editing a meal, add it there too
+    if (editingMeal) {
+      setMealForm({
+        name: recipeData.name,
+        recipe: recipeData.recipe,
+        link: recipeData.link,
+        ingredients: recipeData.ingredients
+      })
+      setShowImportModal(false)
+    } else {
+      setShowImportModal(false)
+      setImportForm({ 
+        url: '', 
+        name: '', 
+        ingredients: '', 
+        recipe: '',
+        cookTime: '',
+        servings: '',
+        author: '',
+        description: ''
+      })
     }
+  } catch (error) {
+    console.error('Error saving imported recipe:', error)
+    alert('Error saving recipe: ' + error.message)
   }
+}
 
   const saveWeekName = async () => {
     if (!weekNameForm.trim()) return
@@ -874,98 +969,153 @@ const MealPlan = ({ family }) => {
       )}
 
       {/* Import Recipe Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Import Recipe from URL</h3>
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Recipe URL</label>
-                <div className="flex space-x-2">
-                  <input
-                    type="url"
-                    value={importForm.url}
-                    onChange={(e) => setImportForm(prev => ({ ...prev, url: e.target.value }))}
-                    className="flex-grow px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    placeholder="https://example.com/recipe"
-                  />
-                  <button
-                    onClick={importRecipeFromUrl}
-                    disabled={importing || !importForm.url}
-                    className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 disabled:opacity-50"
-                  >
-                    {importing ? '⟳' : '🔍'}
-                  </button>
+     // Updated Import Recipe Modal JSX (replace the existing modal in your component)
+{showImportModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-semibold">Import Recipe from URL</h3>
+        <button
+          onClick={() => setShowImportModal(false)}
+          className="text-gray-400 hover:text-gray-600 text-xl"
+        >
+          ✕
+        </button>
+      </div>
+      
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Recipe URL</label>
+          <div className="flex space-x-2">
+            <input
+              type="url"
+              value={importForm.url}
+              onChange={(e) => setImportForm(prev => ({ ...prev, url: e.target.value }))}
+              className="flex-grow px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+              placeholder="https://example.com/recipe"
+            />
+            <button
+              onClick={importRecipeFromUrl}
+              disabled={importing || !importForm.url}
+              className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 disabled:opacity-50 min-w-[80px]"
+            >
+              {importing ? (
+                <div className="flex items-center space-x-1">
+                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                  <span>Parsing...</span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Currently requires manual entry. Auto-parsing coming soon!
-                </p>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Recipe Name</label>
-                <input
-                  type="text"
-                  value={importForm.name}
-                  onChange={(e) => setImportForm(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="Enter recipe name"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients</label>
-                <textarea
-                  value={importForm.ingredients}
-                  onChange={(e) => setImportForm(prev => ({ ...prev, ingredients: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  rows={4}
-                  placeholder="List ingredients (one per line)..."
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Instructions</label>
-                <textarea
-                  value={importForm.recipe}
-                  onChange={(e) => setImportForm(prev => ({ ...prev, recipe: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  rows={3}
-                  placeholder="Enter cooking instructions..."
-                />
-              </div>
-              
-              <div className="flex justify-end space-x-3 mt-6">
-                <button
-                  onClick={() => {
-                    setShowImportModal(false)
-                    setImportForm({ url: '', name: '', ingredients: '', recipe: '' })
-                  }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveImportedRecipe}
-                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700"
-                >
-                  💾 Save Recipe
-                </button>
-              </div>
+              ) : (
+                '🔍 Parse'
+              )}
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            Supports most recipe websites including AllRecipes, Food Network, Bon Appétit, and more!
+          </p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Recipe Name</label>
+            <input
+              type="text"
+              value={importForm.name}
+              onChange={(e) => setImportForm(prev => ({ ...prev, name: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+              placeholder="Enter recipe name"
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Cook Time</label>
+              <input
+                type="text"
+                value={importForm.cookTime || ''}
+                onChange={(e) => setImportForm(prev => ({ ...prev, cookTime: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="30 min"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Servings</label>
+              <input
+                type="text"
+                value={importForm.servings || ''}
+                onChange={(e) => setImportForm(prev => ({ ...prev, servings: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="4"
+              />
             </div>
           </div>
         </div>
-      )}
-
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Ingredients</label>
+          <textarea
+            value={importForm.ingredients}
+            onChange={(e) => setImportForm(prev => ({ ...prev, ingredients: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+            rows={6}
+            placeholder="List ingredients (one per line)..."
+          />
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Instructions</label>
+          <textarea
+            value={importForm.recipe}
+            onChange={(e) => setImportForm(prev => ({ ...prev, recipe: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+            rows={6}
+            placeholder="Enter cooking instructions..."
+          />
+        </div>
+        
+        {importForm.author && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Author</label>
+            <input
+              type="text"
+              value={importForm.author}
+              onChange={(e) => setImportForm(prev => ({ ...prev, author: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+              placeholder="Recipe author"
+            />
+          </div>
+        )}
+        
+        <div className="flex justify-end space-x-3 mt-6">
+          <button
+            onClick={() => {
+              setShowImportModal(false)
+              setImportForm({ 
+                url: '', 
+                name: '', 
+                ingredients: '', 
+                recipe: '',
+                cookTime: '',
+                servings: '',
+                author: '',
+                description: ''
+              })
+            }}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={saveImportedRecipe}
+            disabled={!importForm.name}
+            className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50"
+          >
+            💾 Save Recipe
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
       {/* Week Name Modal */}
       {showWeekNameModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
