@@ -522,3 +522,56 @@ export const isGoogleCalendarConnected = async (familyId) => {
     return false
   }
 }
+
+export const handleGoogleAuthCallback = async (code, familyId) => {
+  try {
+    console.log('Handling Google auth callback with code:', code)
+    
+    // Use the same redirect URI format
+    const redirectUri = window.location.origin
+    
+    const tokenResponse = await fetch('/.netlify/functions/google-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code: code,
+        redirectUri: redirectUri
+      })
+    })
+
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.json()
+      console.error('Token exchange failed:', errorData)
+      throw new Error(`Failed to exchange code for token: ${errorData.error} - ${errorData.details || ''}`)
+    }
+
+    const tokens = await tokenResponse.json()
+    console.log('Received tokens from Google')
+    
+    // Store tokens (rest of your existing code...)
+    await initializeCalendarSyncSettings(familyId)
+    
+    const { error } = await supabase
+      .from('calendar_sync_settings')
+      .update({
+        google_calendar_enabled: true,
+        google_access_token: tokens.access_token,
+        google_refresh_token: tokens.refresh_token || null,
+        last_sync_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('family_id', familyId)
+
+    if (error) {
+      console.error('Error saving tokens:', error)
+      throw error
+    }
+
+    return { success: true, tokens }
+  } catch (error) {
+    console.error('Error handling Google auth callback:', error)
+    throw error
+  }
+}
