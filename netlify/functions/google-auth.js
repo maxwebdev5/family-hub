@@ -1,5 +1,5 @@
 // netlify/functions/google-auth.js
-// This function handles the secure token exchange with Google
+// This function handles the secure token exchange and refresh with Google
 
 exports.handler = async (event, context) => {
   // Enable CORS
@@ -27,40 +27,67 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { code, redirectUri } = JSON.parse(event.body)
-
-    if (!code) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: 'Authorization code is required' })
+    const requestBody = JSON.parse(event.body)
+    
+    let tokenRequestBody
+    
+    if (requestBody.grant_type === 'refresh_token') {
+      // Handle token refresh
+      const { refresh_token } = requestBody
+      
+      if (!refresh_token) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({ error: 'Refresh token is required' })
+        }
       }
-    }
 
-    // Exchange code for tokens
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
+      tokenRequestBody = new URLSearchParams({
+        client_id: process.env.VITE_GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        refresh_token: refresh_token,
+        grant_type: 'refresh_token'
+      })
+    } else {
+      // Handle initial token exchange
+      const { code, redirectUri } = requestBody
+
+      if (!code) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({ error: 'Authorization code is required' })
+        }
+      }
+
+      tokenRequestBody = new URLSearchParams({
         client_id: process.env.VITE_GOOGLE_CLIENT_ID,
         client_secret: process.env.GOOGLE_CLIENT_SECRET,
         code: code,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri
       })
+    }
+
+    // Exchange code for tokens or refresh token
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: tokenRequestBody
     })
 
     const tokenData = await tokenResponse.json()
 
     if (!tokenResponse.ok) {
-      console.error('Google token exchange failed:', tokenData)
+      console.error('Google token request failed:', tokenData)
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ 
-          error: 'Token exchange failed', 
+          error: 'Token request failed', 
           details: tokenData.error_description || tokenData.error 
         })
       }
@@ -83,7 +110,7 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: 'Internal server error' })
+      body: JSON.stringify({ error: 'Internal server error', details: error.message })
     }
   }
 }
