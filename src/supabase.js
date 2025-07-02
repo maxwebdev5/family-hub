@@ -384,19 +384,19 @@ export const syncGoogleCalendarEvents = async (familyId) => {
   }
 }
 
+// Replace the refreshGoogleToken function in src/supabase.js with this:
+
 const refreshGoogleToken = async (familyId, refreshToken) => {
   try {
     console.log('Attempting to refresh Google token...')
     
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
-    
-    const response = await fetch('https://oauth2.googleapis.com/token', {
+    // Use our Netlify function for secure token refresh
+    const response = await fetch('/.netlify/functions/google-auth', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
       },
-      body: new URLSearchParams({
-        client_id: clientId,
+      body: JSON.stringify({
         refresh_token: refreshToken,
         grant_type: 'refresh_token'
       })
