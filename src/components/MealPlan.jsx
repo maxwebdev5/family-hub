@@ -377,19 +377,35 @@ const MealPlan = ({ family }) => {
   }
 
   const addWeek = async () => {
-    const nextWeek = Math.max(...availableWeeks, 0) + 1
-    setAvailableWeeks([...availableWeeks, nextWeek])
+  console.log('🚀 Starting addWeek function')
+  
+  try {
+    // Log everything
+    console.log('Current state:', {
+      availableWeeks,
+      currentWeek,
+      family: family?.family_id,
+      daysOfWeek,
+      mealTypes
+    })
+    
+    // Safe calculation
+    const nextWeek = (availableWeeks?.length || 0) > 0 
+      ? Math.max(...availableWeeks) + 1 
+      : 1
+    
+    console.log('Next week:', nextWeek)
+    
+    setAvailableWeeks([...(availableWeeks || []), nextWeek])
     setCurrentWeek(nextWeek)
     
-    const emptyMeals = {}
-    daysOfWeek.forEach(day => {
-      emptyMeals[day] = {}
-      mealTypes.forEach(mealType => {
-        emptyMeals[day][mealType] = { name: '', recipe: '', link: '', ingredients: '' }
-      })
-    })
-    setMeals(emptyMeals)
+    console.log('✅ Week added successfully!')
+    
+  } catch (error) {
+    console.error('❌ ERROR:', error)
+    alert('Error: ' + error.message)
   }
+}
 
   const deleteWeek = async (weekToDelete) => {
     if (availableWeeks.length <= 1) return
