@@ -285,7 +285,9 @@ useEffect(() => {
     ))
   }
 
-// Replace your importRecipeFromUrl function with this debug version:
+// Replace ONLY the importRecipeFromUrl function in your MealPlan.jsx
+// Don't add the extractSiteNameFromUrl function since you already have it
+// Replace your importRecipeFromUrl function with this corrected version:
 
 const importRecipeFromUrl = async () => {
   if (!importForm.url.trim()) {
@@ -304,7 +306,7 @@ const importRecipeFromUrl = async () => {
   setImporting(true)
   
   try {
-    console.log('🔄 Starting import from:', importForm.url)
+    console.log('Importing recipe from:', importForm.url)
 
     const response = await fetch('/.netlify/functions/recipe-parser', {
       method: 'POST',
@@ -316,73 +318,44 @@ const importRecipeFromUrl = async () => {
       })
     })
 
-    console.log('📡 Response status:', response.status)
-
     if (!response.ok) {
       const errorData = await response.json()
-      console.error('❌ Response error:', errorData)
       throw new Error(errorData.error || `Server error: ${response.status}`)
     }
 
     const result = await response.json()
-    console.log('📦 Full API response:', result)
+    console.log('Recipe import result:', result)
 
     if (!result.success) {
       throw new Error(result.error || 'Failed to parse recipe')
     }
 
     const recipe = result.recipe
-    console.log('🍽️ Recipe data received:', recipe)
-
     const siteName = recipe.siteName || extractSiteNameFromUrl(importForm.url)
-    console.log('🌐 Site name:', siteName)
 
-    // Log what we're about to set
-    const newFormData = {
+    // Update the form with parsed data
+    setImportForm(prev => ({
+      ...prev,
       name: recipe.name || `Recipe from ${siteName}`,
       ingredients: recipe.ingredients || 'Please add ingredients manually.',
       recipe: recipe.instructions || 'Please add cooking instructions manually. Recipe available at the linked URL.'
-    }
-    
-    console.log('📝 Setting form data to:', newFormData)
+    }))
 
-    // Update the form with parsed data
-    setImportForm(prev => {
-      console.log('📋 Previous form data:', prev)
-      const updated = {
-        ...prev,
-        name: newFormData.name,
-        ingredients: newFormData.ingredients,
-        recipe: newFormData.recipe
-      }
-      console.log('✅ New form data:', updated)
-      return updated
-    })
-
-    // Show detailed success message
+    // Show success message
     let successMessage = '✅ Recipe imported successfully!'
     
     if (result.source === 'structured-data') {
-      successMessage += '\n🎯 Found structured recipe data!'
+      successMessage += '\n🎯 Found structured recipe data - all details imported!'
     } else if (result.source === 'html-parsing') {
-      successMessage += '\n📝 Parsed from website content'
-    } else if (result.source === 'basic-html') {
-      successMessage += '\n📄 Basic HTML parsing used'
-    } else if (result.source === 'fallback') {
-      successMessage += '\n⚠️ Used fallback data - please add details manually'
+      successMessage += '\n📝 Imported from website content'
+    } else {
+      successMessage += '\n⚠️ Limited data extracted - please review and edit'
     }
-
-    // Add debug info to alert
-    successMessage += `\n\nDebug Info:`
-    successMessage += `\nSource: ${result.source}`
-    successMessage += `\nName: ${newFormData.name.substring(0, 30)}...`
-    successMessage += `\nIngredients: ${newFormData.ingredients.substring(0, 30)}...`
-    successMessage += `\nInstructions: ${newFormData.recipe.substring(0, 30)}...`
 
     alert(successMessage)
 
   } catch (error) {
-    console.error('💥 Recipe import error:', error)
+    console.error('Recipe import error:', error)
     
     // Provide helpful error messages
     let errorMessage = 'Failed to import recipe: ' + error.message
@@ -395,29 +368,20 @@ const importRecipeFromUrl = async () => {
     
     // Fallback: still allow manual entry with the URL
     const siteName = extractSiteNameFromUrl(importForm.url)
-    const fallbackData = {
-      name: `Recipe from ${siteName}`,
-      recipe: 'Instructions available at the linked URL.',
-      ingredients: 'Please add ingredients manually.'
-    }
-    
-    console.log('🔄 Setting fallback data:', fallbackData)
-    
     setImportForm(prev => ({
       ...prev,
-      name: prev.name || fallbackData.name,
-      recipe: prev.recipe || fallbackData.recipe,
-      ingredients: prev.ingredients || fallbackData.ingredients
+      name: prev.name || `Recipe from ${siteName}`,
+      recipe: prev.recipe || 'Instructions available at the linked URL.',
+      ingredients: prev.ingredients || 'Please add ingredients manually.'
     }))
     
     errorMessage += '\n\nThe URL has been saved. Please add the recipe details manually.'
     alert(errorMessage)
     
   } finally {
-    console.log('🏁 Import process finished')
     setImporting(false)
   }
-}
+} // ← Make sure this closing brace exists!
 
   const saveImportedRecipe = async () => {
     if (!importForm.name) {
