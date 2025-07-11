@@ -33,6 +33,17 @@ const MealPlan = ({ family }) => {
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
   const mealTypes = ['breakfast', 'lunch', 'dinner']
 
+  // Add this near the top of your component (after the state declarations)
+useEffect(() => {
+  console.log('🔄 MealPlan component re-rendered')
+  console.log('State snapshot:', {
+    availableWeeks,
+    currentWeek,
+    showWeekNameModal,
+    loading
+  })
+}, [availableWeeks, currentWeek, showWeekNameModal, loading])
+
   // Helper functions
   const extractSiteNameFromUrl = (url) => {
     try {
