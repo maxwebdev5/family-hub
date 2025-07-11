@@ -285,8 +285,8 @@ useEffect(() => {
     ))
   }
 
-  // Enhanced recipe import function for MealPlan.jsx
-// Replace the existing importRecipeFromUrl function with this improved version
+// Replace ONLY the importRecipeFromUrl function in your MealPlan.jsx
+// Don't add the extractSiteNameFromUrl function since you already have it
 
 const importRecipeFromUrl = async () => {
   if (!importForm.url.trim()) {
@@ -306,23 +306,6 @@ const importRecipeFromUrl = async () => {
   
   try {
     console.log('Importing recipe from:', importForm.url)
-    
-    // Show progress to user
-    const progressMessages = [
-      'Fetching recipe page...',
-      'Parsing recipe data...',
-      'Extracting ingredients and instructions...',
-      'Almost done...'
-    ]
-    
-    let messageIndex = 0
-    const progressInterval = setInterval(() => {
-      if (messageIndex < progressMessages.length - 1) {
-        messageIndex++
-        // You could set this to a state variable to show progress
-        console.log(progressMessages[messageIndex])
-      }
-    }, 1500)
 
     const response = await fetch('/.netlify/functions/recipe-parser', {
       method: 'POST',
@@ -333,8 +316,6 @@ const importRecipeFromUrl = async () => {
         url: importForm.url.trim()
       })
     })
-
-    clearInterval(progressInterval)
 
     if (!response.ok) {
       const errorData = await response.json()
@@ -359,32 +340,15 @@ const importRecipeFromUrl = async () => {
       recipe: recipe.instructions || 'Please add cooking instructions manually. Recipe available at the linked URL.'
     }))
 
-    // Show success message with details
+    // Show success message
     let successMessage = '✅ Recipe imported successfully!'
     
-    if (result.debug) {
-      if (result.debug.hasStructuredData) {
-        successMessage += '\n🎯 Found structured recipe data - all details imported!'
-      } else {
-        successMessage += `\n📝 Imported from ${result.debug.siteName}`
-        if (result.debug.extractedFields.length > 0) {
-          successMessage += `\n✓ Extracted: ${result.debug.extractedFields.join(', ')}`
-        }
-      }
-    }
-
-    // Check what was successfully imported
-    const importedFields = []
-    if (recipe.name) importedFields.push('title')
-    if (recipe.ingredients && recipe.ingredients.length > 10) importedFields.push('ingredients')
-    if (recipe.instructions && recipe.instructions.length > 20) importedFields.push('instructions')
-    if (recipe.cookTime) importedFields.push('cook time')
-    if (recipe.servings) importedFields.push('servings')
-
-    if (importedFields.length > 2) {
-      successMessage += `\n\nℹ️ You may want to review and edit the imported content before saving.`
+    if (result.source === 'structured-data') {
+      successMessage += '\n🎯 Found structured recipe data - all details imported!'
+    } else if (result.source === 'html-parsing') {
+      successMessage += '\n📝 Imported from website content'
     } else {
-      successMessage += `\n\n⚠️ Limited data was extracted. Please fill in missing details manually.`
+      successMessage += '\n⚠️ Limited data extracted - please review and edit'
     }
 
     alert(successMessage)
@@ -395,12 +359,10 @@ const importRecipeFromUrl = async () => {
     // Provide helpful error messages
     let errorMessage = 'Failed to import recipe: ' + error.message
     
-    if (error.message.includes('timeout')) {
-      errorMessage += '\n\nThe website took too long to respond. Please try again or check if the URL is correct.'
-    } else if (error.message.includes('Failed to fetch')) {
-      errorMessage += '\n\nCould not access the website. Please check your internet connection and try again.'
-    } else if (error.message.includes('parse')) {
-      errorMessage += '\n\nThe website structure could not be parsed. You can still save the URL and add details manually.'
+    if (error.message.includes('timeout') || error.message.includes('took too long')) {
+      errorMessage += '\n\nThe website took too long to respond. Please try again.'
+    } else if (error.message.includes('fetch')) {
+      errorMessage += '\n\nCould not access the website. Please check the URL and try again.'
     }
     
     // Fallback: still allow manual entry with the URL
