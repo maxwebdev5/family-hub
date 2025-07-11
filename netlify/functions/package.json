@@ -1,0 +1,16 @@
+{
+  "name": "family-hub-functions",
+  "version": "1.0.0",
+  "description": "Netlify Functions for Family Hub",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7",
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
