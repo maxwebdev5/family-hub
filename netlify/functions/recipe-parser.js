@@ -1,8 +1,5 @@
 // netlify/functions/recipe-parser.js
-// Updated version with better error handling
-
-const https = require('https')
-const http = require('http')
+// Simplified version that works without additional dependencies
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -10,8 +7,6 @@ exports.handler = async (event, context) => {
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   }
-
-  console.log('Function called with method:', event.httpMethod)
 
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
@@ -39,416 +34,301 @@ exports.handler = async (event, context) => {
 
     console.log('Parsing recipe from:', url)
 
-    // Try to import dependencies with fallback
-    let fetch, cheerio
-    try {
-      fetch = require('node-fetch')
-      cheerio = require('cheerio')
-      console.log('Dependencies loaded successfully')
-    } catch (depError) {
-      console.error('Dependency loading error:', depError)
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({
-          error: 'Dependencies not available',
-          details: 'node-fetch or cheerio not installed'
-        })
+    // Fetch the webpage
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; FamilyHub-RecipeBot/1.0)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       }
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
     }
 
-    // Fetch the webpage with timeout and error handling
-    let response
-    try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+    const html = await response.text()
+    console.log('HTML fetched, length:', html.length)
 
-      response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; RecipeBot/1.0)'
-        },
-        signal: controller.signal
-      })
-      
-      clearTimeout(timeout)
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      }
-      
-      console.log('Successfully fetched webpage')
-    } catch (fetchError) {
-      console.error('Fetch error:', fetchError.message)
-      
-      if (fetchError.name === 'AbortError') {
-        return {
-          statusCode: 500,
-          headers,
-          body: JSON.stringify({
-            error: 'Request timeout',
-            details: 'The website took too long to respond'
-          })
-        }
-      }
-      
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({
-          error: 'Failed to fetch webpage',
-          details: fetchError.message
-        })
-      }
-    }
-
-    // Parse the HTML
-    let html, $
-    try {
-      html = await response.text()
-      $ = cheerio.load(html)
-      console.log('HTML parsed successfully, length:', html.length)
-    } catch (parseError) {
-      console.error('HTML parsing error:', parseError)
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({
-          error: 'Failed to parse webpage',
-          details: 'Invalid HTML content'
-        })
-      }
-    }
-
-    // Try to extract recipe data
-    let recipeData
-    try {
-      // Try structured data first
-      recipeData = extractStructuredData($) || parseRecipeFromHTML($, url)
-      console.log('Recipe extraction completed:', !!recipeData.name)
-    } catch (extractError) {
-      console.error('Recipe extraction error:', extractError)
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({
-          error: 'Failed to extract recipe',
-          details: extractError.message
-        })
-      }
-    }
-
+    // Extract recipe data using regex and basic parsing
+    const recipeData = await parseRecipeFromHTML(html, url)
+    
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
         recipe: recipeData,
-        source: recipeData.source || 'html-parsing'
+        source: recipeData.source
       })
     }
 
   } catch (error) {
     console.error('Function error:', error)
+    
+    // Fallback response
+    const siteName = getSiteName(url)
     return {
-      statusCode: 500,
+      statusCode: 200,
       headers,
       body: JSON.stringify({
-        error: 'Internal server error',
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        success: true,
+        recipe: {
+          name: `Recipe from ${siteName}`,
+          description: `Recipe imported from ${siteName}`,
+          ingredients: 'Please add ingredients manually',
+          instructions: 'Please add instructions manually. Full recipe available at the linked URL.',
+          cookTime: '',
+          servings: '',
+          author: '',
+          siteName: siteName,
+          source: 'fallback'
+        },
+        message: 'Recipe URL imported. Please fill in details manually.'
       })
     }
   }
 }
 
-// Extract recipe from JSON-LD structured data
-function extractStructuredData($) {
+async function parseRecipeFromHTML(html, url) {
+  const siteName = getSiteName(url)
+  
   try {
-    const scripts = $('script[type="application/ld+json"]')
+    // Look for JSON-LD structured data first
+    const structuredData = extractJSONLD(html)
+    if (structuredData) {
+      return {
+        ...structuredData,
+        siteName,
+        source: 'structured-data'
+      }
+    }
+
+    // Fallback to basic HTML parsing
+    return {
+      name: extractTitle(html) || `Recipe from ${siteName}`,
+      description: extractMetaDescription(html) || '',
+      ingredients: extractTextBetweenMarkers(html, ['ingredient', 'recipe-ingredient']) || 'Please add ingredients manually',
+      instructions: extractTextBetweenMarkers(html, ['instruction', 'recipe-instruction', 'direction']) || 'Please add instructions manually',
+      cookTime: extractTime(html) || '',
+      servings: extractServings(html) || '',
+      author: extractAuthor(html) || '',
+      siteName,
+      source: 'html-parsing'
+    }
+  } catch (error) {
+    console.error('Parsing error:', error)
+    return {
+      name: `Recipe from ${siteName}`,
+      description: '',
+      ingredients: 'Please add ingredients manually',
+      instructions: 'Please add instructions manually. Full recipe available at the linked URL.',
+      cookTime: '',
+      servings: '',
+      author: '',
+      siteName,
+      source: 'basic-fallback'
+    }
+  }
+}
+
+function extractJSONLD(html) {
+  try {
+    // Find JSON-LD script tags
+    const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis
+    const matches = html.match(jsonLdRegex)
     
-    for (let i = 0; i < scripts.length; i++) {
+    if (!matches) return null
+
+    for (const match of matches) {
       try {
-        const jsonText = $(scripts[i]).html()
-        if (!jsonText) continue
+        const jsonContent = match.replace(/<script[^>]*>/i, '').replace(/<\/script>/i, '').trim()
+        const data = JSON.parse(jsonContent)
         
-        const data = JSON.parse(jsonText)
+        // Handle both single objects and arrays
         const items = Array.isArray(data) ? data : [data]
         
         for (const item of items) {
-          if (item['@type'] === 'Recipe' || 
-              (Array.isArray(item['@type']) && item['@type'].includes('Recipe'))) {
-            
+          if (item['@type'] === 'Recipe') {
             return {
               name: item.name || '',
               description: item.description || '',
-              ingredients: extractIngredients(item.recipeIngredient || []),
-              instructions: extractInstructions(item.recipeInstructions || []),
-              cookTime: item.cookTime || item.totalTime || '',
+              ingredients: Array.isArray(item.recipeIngredient) 
+                ? item.recipeIngredient.join('\n') 
+                : '',
+              instructions: formatInstructions(item.recipeInstructions) || '',
+              cookTime: formatTime(item.cookTime || item.totalTime) || '',
               servings: item.recipeYield || item.yield || '',
-              author: item.author?.name || item.author || '',
-              source: 'structured-data'
+              author: typeof item.author === 'object' ? item.author.name : item.author || ''
             }
           }
         }
       } catch (e) {
-        console.log('JSON-LD parse error:', e.message)
+        console.log('JSON parsing error:', e.message)
         continue
       }
     }
-    
-    return null
   } catch (error) {
-    console.log('Structured data extraction failed:', error.message)
-    return null
+    console.log('JSON-LD extraction failed:', error.message)
   }
+  
+  return null
 }
 
-// Parse recipe from HTML elements
-function parseRecipeFromHTML($, url) {
-  try {
-    const siteName = new URL(url).hostname.replace('www.', '')
+function extractTitle(html) {
+  // Try various title patterns
+  const patterns = [
+    /<h1[^>]*class[^>]*recipe[^>]*>([^<]+)<\/h1>/i,
+    /<h1[^>]*>([^<]+)<\/h1>/i,
+    /<title[^>]*>([^<]+)<\/title>/i
+  ]
+  
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match && match[1]) {
+      return match[1].trim().replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    }
+  }
+  
+  return ''
+}
+
+function extractMetaDescription(html) {
+  const patterns = [
+    /<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i
+  ]
+  
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match && match[1] && match[1].length > 20) {
+      return match[1].trim()
+    }
+  }
+  
+  return ''
+}
+
+function extractTextBetweenMarkers(html, keywords) {
+  for (const keyword of keywords) {
+    // Look for lists or divs with keyword in class name
+    const pattern = new RegExp(`<[^>]*class[^>]*${keyword}[^>]*>([\\s\\S]*?)<\/[^>]+>`, 'gi')
+    const matches = html.match(pattern)
     
-    return {
-      name: extractTitle($) || 'Imported Recipe',
-      description: extractDescription($) || '',
-      ingredients: extractIngredientsFromHTML($) || '',
-      instructions: extractInstructionsFromHTML($) || '',
-      cookTime: extractTimeFromHTML($) || '',
-      servings: extractServingsFromHTML($) || '',
-      author: extractAuthorFromHTML($) || '',
-      siteName: siteName,
-      source: 'html-parsing'
-    }
-  } catch (error) {
-    console.error('HTML parsing error:', error)
-    return {
-      name: 'Imported Recipe',
-      description: '',
-      ingredients: '',
-      instructions: '',
-      cookTime: '',
-      servings: '',
-      author: '',
-      source: 'fallback'
-    }
-  }
-}
-
-function extractTitle($) {
-  const selectors = [
-    'h1.recipe-title',
-    'h1.entry-title', 
-    '.recipe-header h1',
-    'h1[itemprop="name"]',
-    'h1',
-    'title'
-  ]
-  
-  for (const selector of selectors) {
-    try {
-      const element = $(selector).first()
-      if (element.length && element.text().trim()) {
-        return element.text().trim()
-      }
-    } catch (e) {
-      continue
-    }
-  }
-  
-  return ''
-}
-
-function extractDescription($) {
-  const selectors = [
-    '.recipe-description',
-    '.recipe-summary',
-    '[itemprop="description"]',
-    'meta[name="description"]'
-  ]
-  
-  for (const selector of selectors) {
-    try {
-      const element = $(selector).first()
-      if (element.length) {
-        const text = selector === 'meta[name="description"]' 
-          ? element.attr('content') 
-          : element.text().trim()
-        
-        if (text && text.length > 20) {
-          return text
+    if (matches) {
+      const items = []
+      for (const match of matches) {
+        // Extract text content from list items or paragraphs
+        const listItems = match.match(/<li[^>]*>([^<]+)<\/li>/gi)
+        if (listItems) {
+          listItems.forEach(item => {
+            const text = item.replace(/<[^>]+>/g, '').trim()
+            if (text && text.length > 3) {
+              items.push(text)
+            }
+          })
         }
       }
-    } catch (e) {
-      continue
+      
+      if (items.length > 0) {
+        return items.join('\n')
+      }
     }
   }
   
   return ''
 }
 
-function extractIngredientsFromHTML($) {
-  const selectors = [
-    '[itemprop="recipeIngredient"]',
-    '.recipe-ingredient',
-    '.ingredients li',
-    '.recipe-ingredients li'
+function extractTime(html) {
+  const patterns = [
+    /<time[^>]*datetime=["']([^"']+)["']/i,
+    /(?:cook|prep|total)[^>]*time[^>]*>([^<]+)</i
   ]
   
-  for (const selector of selectors) {
-    try {
-      const elements = $(selector)
-      if (elements.length > 0) {
-        const ingredients = []
-        elements.each((i, el) => {
-          const text = $(el).text().trim()
-          if (text && !text.match(/^(ingredients|directions)$/i)) {
-            ingredients.push(text)
-          }
-        })
-        
-        if (ingredients.length > 0) {
-          return ingredients.join('\n')
-        }
-      }
-    } catch (e) {
-      continue
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match && match[1]) {
+      return formatTime(match[1].trim())
     }
   }
   
   return ''
 }
 
-function extractInstructionsFromHTML($) {
-  const selectors = [
-    '[itemprop="recipeInstructions"]',
-    '.recipe-instruction',
-    '.instructions li',
-    '.recipe-instructions li'
+function extractServings(html) {
+  const patterns = [
+    /(?:serves?|servings?|yield)[^>]*>([^<]+)</i,
+    /(\d+)\s*(?:servings?|portions?)/i
   ]
   
-  for (const selector of selectors) {
-    try {
-      const elements = $(selector)
-      if (elements.length > 0) {
-        const instructions = []
-        elements.each((i, el) => {
-          const text = $(el).text().trim()
-          if (text && !text.match(/^(ingredients|directions)$/i)) {
-            instructions.push(`${i + 1}. ${text}`)
-          }
-        })
-        
-        if (instructions.length > 0) {
-          return instructions.join('\n\n')
-        }
-      }
-    } catch (e) {
-      continue
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match && match[1]) {
+      const num = match[1].match(/\d+/)
+      if (num) return num[0]
     }
   }
   
   return ''
 }
 
-function extractTimeFromHTML($) {
-  const selectors = [
-    '[itemprop="cookTime"]',
-    '[itemprop="totalTime"]',
-    '.cook-time',
-    '.total-time'
+function extractAuthor(html) {
+  const patterns = [
+    /<meta[^>]*name=["']author["'][^>]*content=["']([^"']+)["']/i,
+    /(?:by|recipe by|author)[^>]*>([^<]+)</i
   ]
   
-  for (const selector of selectors) {
-    try {
-      const element = $(selector).first()
-      if (element.length) {
-        const time = element.attr('datetime') || element.text().trim()
-        if (time) return time
-      }
-    } catch (e) {
-      continue
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match && match[1]) {
+      return match[1].trim()
     }
   }
   
   return ''
 }
 
-function extractServingsFromHTML($) {
-  const selectors = [
-    '[itemprop="recipeYield"]',
-    '.servings',
-    '.recipe-yield'
-  ]
+function formatInstructions(instructions) {
+  if (!instructions || !Array.isArray(instructions)) return ''
   
-  for (const selector of selectors) {
-    try {
-      const element = $(selector).first()
-      if (element.length) {
-        const servings = element.text().trim().match(/\d+/)
-        if (servings) return servings[0]
+  return instructions
+    .map((inst, index) => {
+      let text = ''
+      if (typeof inst === 'string') {
+        text = inst
+      } else if (inst.text) {
+        text = inst.text
+      } else if (inst.name) {
+        text = inst.name
       }
-    } catch (e) {
-      continue
-    }
-  }
-  
-  return ''
+      
+      return text ? `${index + 1}. ${text}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
 }
 
-function extractAuthorFromHTML($) {
-  const selectors = [
-    '[itemprop="author"]',
-    '.recipe-author',
-    '.author-name'
-  ]
+function formatTime(timeString) {
+  if (!timeString) return ''
   
-  for (const selector of selectors) {
-    try {
-      const element = $(selector).first()
-      if (element.length) {
-        return element.text().trim()
-      }
-    } catch (e) {
-      continue
-    }
+  // Handle ISO 8601 duration (PT30M)
+  if (timeString.match(/^PT/)) {
+    const hours = timeString.match(/(\d+)H/)
+    const minutes = timeString.match(/(\d+)M/)
+    
+    let result = ''
+    if (hours) result += `${hours[1]} hours `
+    if (minutes) result += `${minutes[1]} minutes`
+    
+    return result.trim()
   }
   
-  return ''
+  return timeString
 }
 
-// Helper functions for structured data
-function extractIngredients(ingredients) {
-  if (!Array.isArray(ingredients)) return ''
+function getSiteName(url) {
   try {
-    return ingredients
-      .map(ing => typeof ing === 'string' ? ing : (ing.text || ''))
-      .filter(Boolean)
-      .join('\n')
-  } catch (e) {
-    return ''
-  }
-}
-
-function extractInstructions(instructions) {
-  if (!Array.isArray(instructions)) return ''
-  
-  try {
-    return instructions
-      .map((inst, index) => {
-        let text = ''
-        if (typeof inst === 'string') {
-          text = inst
-        } else if (inst.text) {
-          text = inst.text
-        } else if (inst.name) {
-          text = inst.name
-        }
-        
-        return text ? `${index + 1}. ${text}` : ''
-      })
-      .filter(Boolean)
-      .join('\n\n')
-  } catch (e) {
-    return ''
+    return new URL(url).hostname.replace('www.', '')
+  } catch {
+    return 'Unknown Site'
   }
 }
