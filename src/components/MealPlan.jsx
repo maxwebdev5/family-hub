@@ -364,7 +364,7 @@ const importRecipeFromUrl = async () => {
     } else if (error.message.includes('fetch')) {
       errorMessage += '\n\nCould not access the website. Please check the URL and try again.'
     }
-    
+  }
 // Enhanced helper function for better URL validation
 const extractSiteNameFromUrl = (url) => {
   try {
