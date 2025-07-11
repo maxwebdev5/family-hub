@@ -33,17 +33,6 @@ const MealPlan = ({ family }) => {
   const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
   const mealTypes = ['breakfast', 'lunch', 'dinner']
 
-  // Add this near the top of your component (after the state declarations)
-useEffect(() => {
-  console.log('🔄 MealPlan component re-rendered')
-  console.log('State snapshot:', {
-    availableWeeks,
-    currentWeek,
-    showWeekNameModal,
-    loading
-  })
-}, [availableWeeks, currentWeek, showWeekNameModal, loading])
-
   // Helper functions
   const extractSiteNameFromUrl = (url) => {
     try {
@@ -54,13 +43,13 @@ useEffect(() => {
     }
   }
 
-  useEffect(() => {
-    if (family) {
-      loadMealPlan()
-      loadFavoriteRecipes()
-      loadWeekNames()
-    }
-  }, [family, currentWeek])
+useEffect(() => {
+  if (family?.family_id) {
+    loadMealPlan()
+    loadFavoriteRecipes()
+    loadWeekNames()
+  }
+}, [family?.family_id])  // ← Fixed: removed currentWeek
 
   const loadMealPlan = async () => {
     try {
