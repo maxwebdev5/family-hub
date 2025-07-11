@@ -365,23 +365,6 @@ const importRecipeFromUrl = async () => {
       errorMessage += '\n\nCould not access the website. Please check the URL and try again.'
     }
     
-    // Fallback: still allow manual entry with the URL
-    const siteName = extractSiteNameFromUrl(importForm.url)
-    setImportForm(prev => ({
-      ...prev,
-      name: prev.name || `Recipe from ${siteName}`,
-      recipe: prev.recipe || 'Instructions available at the linked URL.',
-      ingredients: prev.ingredients || 'Please add ingredients manually.'
-    }))
-    
-    errorMessage += '\n\nThe URL has been saved. Please add the recipe details manually.'
-    alert(errorMessage)
-    
-  } finally {
-    setImporting(false)
-  }
-}
-
 // Enhanced helper function for better URL validation
 const extractSiteNameFromUrl = (url) => {
   try {
