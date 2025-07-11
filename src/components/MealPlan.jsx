@@ -283,7 +283,9 @@ const MealPlan = ({ family }) => {
     ))
   }
 
- const importRecipeFromUrl = async () => {
+ // Update your importRecipeFromUrl function in MealPlan.jsx with better error handling
+
+const importRecipeFromUrl = async () => {
   if (!importForm.url) {
     alert('Please enter a recipe URL')
     return
@@ -291,7 +293,7 @@ const MealPlan = ({ family }) => {
 
   setImporting(true)
   try {
-    console.log('Importing recipe from:', importForm.url)
+    console.log('🔍 Importing recipe from:', importForm.url)
     
     // Call our Netlify function to parse the recipe
     const response = await fetch('/.netlify/functions/recipe-parser', {
@@ -304,14 +306,50 @@ const MealPlan = ({ family }) => {
       })
     })
 
+    console.log('📡 Function response status:', response.status)
+    console.log('📡 Function response ok:', response.ok)
+
+    // Get the response text first to see what we're getting
+    const responseText = await response.text()
+    console.log('📄 Raw response:', responseText)
+
     if (!response.ok) {
-      throw new Error(`Failed to parse recipe: ${response.status}`)
+      // Try to parse the error response
+      let errorData
+      try {
+        errorData = JSON.parse(responseText)
+        console.error('❌ Parsed error data:', errorData)
+      } catch (parseError) {
+        console.error('❌ Could not parse error response:', responseText)
+        throw new Error(`HTTP ${response.status}: ${responseText}`)
+      }
+      
+      // Show more detailed error message
+      const errorMessage = errorData.details 
+        ? `${errorData.error}: ${errorData.details}`
+        : errorData.error || `HTTP ${response.status} error`
+      
+      throw new Error(errorMessage)
     }
 
-    const result = await response.json()
+    // Parse successful response
+    let result
+    try {
+      result = JSON.parse(responseText)
+      console.log('✅ Parsed success response:', result)
+    } catch (parseError) {
+      console.error('❌ Could not parse success response:', responseText)
+      throw new Error('Invalid response format from server')
+    }
     
-    if (result.success) {
+    if (result.success && result.recipe) {
       const recipe = result.recipe
+      console.log('🍳 Recipe data received:', {
+        name: recipe.name,
+        hasIngredients: !!recipe.ingredients,
+        hasInstructions: !!recipe.instructions,
+        source: result.source
+      })
       
       // Auto-fill the form with parsed data
       setImportForm(prev => ({
@@ -319,28 +357,42 @@ const MealPlan = ({ family }) => {
         name: recipe.name || prev.name || extractSiteNameFromUrl(prev.url),
         ingredients: recipe.ingredients || prev.ingredients,
         recipe: formatInstructions(recipe.instructions) || prev.recipe,
-        // Store additional metadata
         cookTime: recipe.cookTime || '',
         servings: recipe.servings || '',
         author: recipe.author || '',
-        description: recipe.description || '',
-        image: recipe.image || ''
+        description: recipe.description || ''
       }))
       
       // Show success message
       const sourceMsg = result.source === 'structured-data' 
-        ? 'Recipe auto-parsed successfully!' 
-        : 'Recipe parsed from webpage content!'
+        ? '✅ Recipe auto-parsed successfully from structured data!' 
+        : result.source === 'html-parsing'
+        ? '✅ Recipe parsed from webpage content!'
+        : '✅ Recipe imported!'
       
       alert(sourceMsg + ' Please review and edit as needed.')
       
     } else {
-      throw new Error(result.details || 'Failed to parse recipe')
+      console.error('❌ Unexpected response format:', result)
+      throw new Error('Invalid response format: missing recipe data')
     }
     
   } catch (error) {
-    console.error('Recipe import error:', error)
+    console.error('💥 Recipe import error details:', {
+      message: error.message,
+      stack: error.stack,
+      url: importForm.url
+    })
     
+    // Show user-friendly error with debugging info
+    const errorMessage = error.message.includes('Failed to fetch') 
+      ? 'Network error: Could not connect to recipe parser'
+      : error.message.includes('timeout')
+      ? 'Timeout error: Website took too long to respond'
+      : error.message.includes('Dependencies not available')
+      ? 'Server error: Recipe parser dependencies not installed'
+      : error.message
+
     // Fallback to manual entry
     const siteName = extractSiteNameFromUrl(importForm.url)
     setImportForm(prev => ({
@@ -349,11 +401,70 @@ const MealPlan = ({ family }) => {
       recipe: prev.recipe || 'Instructions available at the linked URL.'
     }))
     
-    alert(`Could not auto-parse recipe (${error.message}). Please fill in the details manually.`)
+    alert(`❌ Could not auto-parse recipe: ${errorMessage}\n\nPlease fill in the details manually.\n\nCheck browser console (F12) for technical details.`)
   } finally {
     setImporting(false)
   }
 }
+
+// Helper function to extract site name from URL (add this if not already present)
+const extractSiteNameFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.replace('www.', '')
+  } catch {
+    return 'Unknown Site'
+  }
+}
+
+// Helper function to format instructions (add this if not already present)
+const formatInstructions = (instructions) => {
+  if (!instructions) return ''
+  
+  // If instructions are already formatted with numbers, return as-is
+  if (instructions.match(/^\d+\./m)) {
+    return instructions
+  }
+  
+  // Otherwise, split by periods or newlines and add numbers
+  const steps = instructions
+    .split(/[.\n]/)
+    .map(step => step.trim())
+    .filter(step => step.length > 10) // Filter out very short fragments
+  
+  if (steps.length > 1) {
+    return steps.map((step, index) => `${index + 1}. ${step}`).join('\n\n')
+  }
+  
+  return instructions
+}
+
+// Also add this test function to help debug
+const testFunction = async () => {
+  try {
+    console.log('🧪 Testing function connection...')
+    
+    const response = await fetch('/.netlify/functions/recipe-parser', {
+      method: 'OPTIONS'
+    })
+    
+    console.log('🧪 OPTIONS response:', {
+      status: response.status,
+      ok: response.ok,
+      headers: [...response.headers.entries()]
+    })
+    
+    if (response.ok) {
+      console.log('✅ Function is accessible')
+    } else {
+      console.log('❌ Function not accessible')
+    }
+  } catch (error) {
+    console.error('❌ Function test failed:', error)
+  }
+}
+
+// You can call testFunction() in browser console to test if function is accessible
 
   // Helper function to extract site name from URL
 const extractSiteNameFromUrl = (url) => {
