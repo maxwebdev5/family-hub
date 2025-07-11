@@ -389,7 +389,6 @@ const extractSiteNameFromUrl = (url) => {
   } catch {
     return 'Unknown Site'
   }
-}
 
 // Enhanced UI feedback component (optional addition to your modal)
 const RecipeImportProgress = ({ importing, message }) => {
