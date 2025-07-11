@@ -285,40 +285,188 @@ useEffect(() => {
     ))
   }
 
-  const importRecipeFromUrl = async () => {
-    if (!importForm.url) {
-      alert('Please enter a recipe URL')
-      return
+  // Enhanced recipe import function for MealPlan.jsx
+// Replace the existing importRecipeFromUrl function with this improved version
+
+const importRecipeFromUrl = async () => {
+  if (!importForm.url.trim()) {
+    alert('Please enter a recipe URL')
+    return
+  }
+
+  // Validate URL format
+  try {
+    new URL(importForm.url)
+  } catch {
+    alert('Please enter a valid URL (e.g., https://example.com/recipe)')
+    return
+  }
+
+  setImporting(true)
+  
+  try {
+    console.log('Importing recipe from:', importForm.url)
+    
+    // Show progress to user
+    const progressMessages = [
+      'Fetching recipe page...',
+      'Parsing recipe data...',
+      'Extracting ingredients and instructions...',
+      'Almost done...'
+    ]
+    
+    let messageIndex = 0
+    const progressInterval = setInterval(() => {
+      if (messageIndex < progressMessages.length - 1) {
+        messageIndex++
+        // You could set this to a state variable to show progress
+        console.log(progressMessages[messageIndex])
+      }
+    }, 1500)
+
+    const response = await fetch('/.netlify/functions/recipe-parser', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: importForm.url.trim()
+      })
+    })
+
+    clearInterval(progressInterval)
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || `Server error: ${response.status}`)
     }
 
-    setImporting(true)
-    try {
-      const siteName = extractSiteNameFromUrl(importForm.url)
-      
-      setImportForm(prev => ({
-        ...prev,
-        name: prev.name || `Recipe from ${siteName}`,
-        recipe: prev.recipe || 'Please add instructions manually. Recipe available at the linked URL.',
-        ingredients: prev.ingredients || 'Please add ingredients manually.'
-      }))
-      
-      alert('✅ Recipe URL imported! Please fill in the details manually.')
-      
-    } catch (error) {
-      console.error('Recipe import error:', error)
-      
-      const siteName = extractSiteNameFromUrl(importForm.url)
-      setImportForm(prev => ({
-        ...prev,
-        name: prev.name || `Recipe from ${siteName}`,
-        recipe: prev.recipe || 'Instructions available at the linked URL.'
-      }))
-      
-      alert('Recipe URL saved. Please add details manually.')
-    } finally {
-      setImporting(false)
+    const result = await response.json()
+    console.log('Recipe import result:', result)
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to parse recipe')
     }
+
+    const recipe = result.recipe
+    const siteName = recipe.siteName || extractSiteNameFromUrl(importForm.url)
+
+    // Update the form with parsed data
+    setImportForm(prev => ({
+      ...prev,
+      name: recipe.name || `Recipe from ${siteName}`,
+      ingredients: recipe.ingredients || 'Please add ingredients manually.',
+      recipe: recipe.instructions || 'Please add cooking instructions manually. Recipe available at the linked URL.'
+    }))
+
+    // Show success message with details
+    let successMessage = '✅ Recipe imported successfully!'
+    
+    if (result.debug) {
+      if (result.debug.hasStructuredData) {
+        successMessage += '\n🎯 Found structured recipe data - all details imported!'
+      } else {
+        successMessage += `\n📝 Imported from ${result.debug.siteName}`
+        if (result.debug.extractedFields.length > 0) {
+          successMessage += `\n✓ Extracted: ${result.debug.extractedFields.join(', ')}`
+        }
+      }
+    }
+
+    // Check what was successfully imported
+    const importedFields = []
+    if (recipe.name) importedFields.push('title')
+    if (recipe.ingredients && recipe.ingredients.length > 10) importedFields.push('ingredients')
+    if (recipe.instructions && recipe.instructions.length > 20) importedFields.push('instructions')
+    if (recipe.cookTime) importedFields.push('cook time')
+    if (recipe.servings) importedFields.push('servings')
+
+    if (importedFields.length > 2) {
+      successMessage += `\n\nℹ️ You may want to review and edit the imported content before saving.`
+    } else {
+      successMessage += `\n\n⚠️ Limited data was extracted. Please fill in missing details manually.`
+    }
+
+    alert(successMessage)
+
+  } catch (error) {
+    console.error('Recipe import error:', error)
+    
+    // Provide helpful error messages
+    let errorMessage = 'Failed to import recipe: ' + error.message
+    
+    if (error.message.includes('timeout')) {
+      errorMessage += '\n\nThe website took too long to respond. Please try again or check if the URL is correct.'
+    } else if (error.message.includes('Failed to fetch')) {
+      errorMessage += '\n\nCould not access the website. Please check your internet connection and try again.'
+    } else if (error.message.includes('parse')) {
+      errorMessage += '\n\nThe website structure could not be parsed. You can still save the URL and add details manually.'
+    }
+    
+    // Fallback: still allow manual entry with the URL
+    const siteName = extractSiteNameFromUrl(importForm.url)
+    setImportForm(prev => ({
+      ...prev,
+      name: prev.name || `Recipe from ${siteName}`,
+      recipe: prev.recipe || 'Instructions available at the linked URL.',
+      ingredients: prev.ingredients || 'Please add ingredients manually.'
+    }))
+    
+    errorMessage += '\n\nThe URL has been saved. Please add the recipe details manually.'
+    alert(errorMessage)
+    
+  } finally {
+    setImporting(false)
   }
+}
+
+// Enhanced helper function for better URL validation
+const extractSiteNameFromUrl = (url) => {
+  try {
+    const urlObj = new URL(url)
+    let hostname = urlObj.hostname.replace('www.', '')
+    
+    // Make it more readable for common sites
+    const siteNames = {
+      'allrecipes.com': 'AllRecipes',
+      'foodnetwork.com': 'Food Network',
+      'bonappetit.com': 'Bon Appétit',
+      'epicurious.com': 'Epicurious',
+      'tasty.co': 'Tasty',
+      'food.com': 'Food.com',
+      'delish.com': 'Delish',
+      'eatingwell.com': 'EatingWell',
+      'tasteofhome.com': 'Taste of Home',
+      'thekitchn.com': 'The Kitchn'
+    }
+    
+    return siteNames[hostname] || hostname
+  } catch {
+    return 'Unknown Site'
+  }
+}
+
+// Enhanced UI feedback component (optional addition to your modal)
+const RecipeImportProgress = ({ importing, message }) => {
+  if (!importing) return null
+  
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+        <div className="text-center">
+          <div className="animate-spin text-4xl mb-4">🔄</div>
+          <h3 className="text-lg font-semibold mb-2">Importing Recipe</h3>
+          <p className="text-gray-600">{message || 'Please wait while we fetch the recipe...'}</p>
+          <div className="mt-4">
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
   const saveImportedRecipe = async () => {
     if (!importForm.name) {
