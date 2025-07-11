@@ -376,34 +376,86 @@ const MealPlan = ({ family }) => {
     }
   }
 
-  const addWeek = async () => {
+ const addWeek = async () => {
   console.log('🚀 Starting addWeek function')
   
   try {
-    // Log everything
+    // Log current state
     console.log('Current state:', {
       availableWeeks,
       currentWeek,
-      family: family?.family_id,
+      family: family?.family_id
+    })
+    
+    // Check if we have required data
+    if (!family?.family_id) {
+      throw new Error('No family data available')
+    }
+    
+    // Safely calculate next week
+    let nextWeek
+    if (!availableWeeks || availableWeeks.length === 0) {
+      console.log('No available weeks, starting with week 1')
+      nextWeek = 1
+    } else {
+      nextWeek = Math.max(...availableWeeks) + 1
+      console.log('Calculated next week:', nextWeek)
+    }
+    
+    // Update availableWeeks state
+    console.log('Updating availableWeeks state...')
+    const newAvailableWeeks = [...(availableWeeks || []), nextWeek]
+    setAvailableWeeks(newAvailableWeeks)
+    console.log('New availableWeeks:', newAvailableWeeks)
+    
+    // Update current week
+    console.log('Setting current week to:', nextWeek)
+    setCurrentWeek(nextWeek)
+    
+    // Create empty meals structure
+    console.log('Creating empty meals structure...')
+    const emptyMeals = {}
+    
+    if (!daysOfWeek || !Array.isArray(daysOfWeek)) {
+      throw new Error('daysOfWeek is not defined or not an array')
+    }
+    
+    if (!mealTypes || !Array.isArray(mealTypes)) {
+      throw new Error('mealTypes is not defined or not an array')
+    }
+    
+    daysOfWeek.forEach(day => {
+      emptyMeals[day] = {}
+      mealTypes.forEach(mealType => {
+        emptyMeals[day][mealType] = { 
+          name: '', 
+          recipe: '', 
+          link: '', 
+          ingredients: '' 
+        }
+      })
+    })
+    
+    console.log('Empty meals structure created:', Object.keys(emptyMeals))
+    
+    // Update meals state
+    console.log('Setting meals state...')
+    setMeals(emptyMeals)
+    
+    console.log('✅ addWeek completed successfully!')
+    
+  } catch (error) {
+    console.error('❌ ERROR in addWeek:', error)
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      availableWeeks,
       daysOfWeek,
       mealTypes
     })
     
-    // Safe calculation
-    const nextWeek = (availableWeeks?.length || 0) > 0 
-      ? Math.max(...availableWeeks) + 1 
-      : 1
-    
-    console.log('Next week:', nextWeek)
-    
-    setAvailableWeeks([...(availableWeeks || []), nextWeek])
-    setCurrentWeek(nextWeek)
-    
-    console.log('✅ Week added successfully!')
-    
-  } catch (error) {
-    console.error('❌ ERROR:', error)
-    alert('Error: ' + error.message)
+    // Show user-friendly error
+    alert(`Failed to add week: ${error.message}`)
   }
 }
 
