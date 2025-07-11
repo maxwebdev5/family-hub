@@ -26,11 +26,7 @@ const MealPlan = ({ family }) => {
     url: '',
     name: '',
     ingredients: '',
-    recipe: '',
-    cookTime: '',
-    servings: '',
-    author: '',
-    description: ''
+    recipe: ''
   })
   const [weekNameForm, setWeekNameForm] = useState('')
 
@@ -47,27 +43,6 @@ const MealPlan = ({ family }) => {
     }
   }
 
-  const formatInstructions = (instructions) => {
-    if (!instructions) return ''
-    
-    // If instructions are already formatted with numbers, return as-is
-    if (instructions.match(/^\d+\./m)) {
-      return instructions
-    }
-    
-    // Otherwise, split by periods or newlines and add numbers
-    const steps = instructions
-      .split(/[.\n]/)
-      .map(step => step.trim())
-      .filter(step => step.length > 10) // Filter out very short fragments
-    
-    if (steps.length > 1) {
-      return steps.map((step, index) => `${index + 1}. ${step}`).join('\n\n')
-    }
-    
-    return instructions
-  }
-
   useEffect(() => {
     if (family) {
       loadMealPlan()
@@ -78,7 +53,6 @@ const MealPlan = ({ family }) => {
 
   const loadMealPlan = async () => {
     try {
-      // Load meals for current week
       const { data: mealsData, error } = await supabase
         .from('meals')
         .select('*')
@@ -87,7 +61,6 @@ const MealPlan = ({ family }) => {
 
       if (error) throw error
 
-      // Load available weeks
       const { data: weeksData } = await supabase
         .from('meals')
         .select('week_number')
@@ -96,7 +69,6 @@ const MealPlan = ({ family }) => {
       const weeks = [...new Set(weeksData?.map(m => m.week_number) || [1])]
       setAvailableWeeks(weeks.sort((a, b) => a - b))
 
-      // Organize meals by day and meal type
       const mealsByDay = {}
       daysOfWeek.forEach(day => {
         mealsByDay[day] = {}
@@ -160,7 +132,6 @@ const MealPlan = ({ family }) => {
     try {
       const { week, day, mealType } = editingMeal
 
-      // Check if meal already exists
       const { data: existingMeal } = await supabase
         .from('meals')
         .select('id')
@@ -193,7 +164,6 @@ const MealPlan = ({ family }) => {
           .insert(mealData)
       }
 
-      // Update local state
       setMeals(prev => ({
         ...prev,
         [day]: {
@@ -289,7 +259,6 @@ const MealPlan = ({ family }) => {
       })
     })
 
-    // Remove duplicates and group similar items
     const uniqueIngredients = []
     const seen = new Set()
     
@@ -324,106 +293,20 @@ const MealPlan = ({ family }) => {
 
     setImporting(true)
     try {
-      console.log('🔍 Importing recipe from:', importForm.url)
+      const siteName = extractSiteNameFromUrl(importForm.url)
       
-      // Call our Netlify function to parse the recipe
-      const response = await fetch('/.netlify/functions/recipe-parser', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: importForm.url
-        })
-      })
-
-      console.log('📡 Function response status:', response.status)
+      setImportForm(prev => ({
+        ...prev,
+        name: prev.name || `Recipe from ${siteName}`,
+        recipe: prev.recipe || 'Please add instructions manually. Recipe available at the linked URL.',
+        ingredients: prev.ingredients || 'Please add ingredients manually.'
+      }))
       
-      // Get the response text first to see what we're getting
-      const responseText = await response.text()
-      console.log('📄 Raw response:', responseText)
-
-      if (!response.ok) {
-        // Try to parse the error response
-        let errorData
-        try {
-          errorData = JSON.parse(responseText)
-          console.error('❌ Parsed error data:', errorData)
-        } catch (parseError) {
-          console.error('❌ Could not parse error response:', responseText)
-          throw new Error(`HTTP ${response.status}: ${responseText}`)
-        }
-        
-        // Show more detailed error message
-        const errorMessage = errorData.details 
-          ? `${errorData.error}: ${errorData.details}`
-          : errorData.error || `HTTP ${response.status} error`
-        
-        throw new Error(errorMessage)
-      }
-
-      // Parse successful response
-      let result
-      try {
-        result = JSON.parse(responseText)
-        console.log('✅ Parsed success response:', result)
-      } catch (parseError) {
-        console.error('❌ Could not parse success response:', responseText)
-        throw new Error('Invalid response format from server')
-      }
-      
-      if (result.success && result.recipe) {
-        const recipe = result.recipe
-        console.log('🍳 Recipe data received:', {
-          name: recipe.name,
-          hasIngredients: !!recipe.ingredients,
-          hasInstructions: !!recipe.instructions,
-          source: result.source
-        })
-        
-        // Auto-fill the form with parsed data
-        setImportForm(prev => ({
-          ...prev,
-          name: recipe.name || prev.name || extractSiteNameFromUrl(prev.url),
-          ingredients: recipe.ingredients || prev.ingredients,
-          recipe: formatInstructions(recipe.instructions) || prev.recipe,
-          cookTime: recipe.cookTime || '',
-          servings: recipe.servings || '',
-          author: recipe.author || '',
-          description: recipe.description || ''
-        }))
-        
-        // Show success message
-        const sourceMsg = result.source === 'structured-data' 
-          ? '✅ Recipe auto-parsed successfully from structured data!' 
-          : result.source === 'html-parsing'
-          ? '✅ Recipe parsed from webpage content!'
-          : '✅ Recipe imported!'
-        
-        alert(sourceMsg + ' Please review and edit as needed.')
-        
-      } else {
-        console.error('❌ Unexpected response format:', result)
-        throw new Error('Invalid response format: missing recipe data')
-      }
+      alert('✅ Recipe URL imported! Please fill in the details manually.')
       
     } catch (error) {
-      console.error('💥 Recipe import error details:', {
-        message: error.message,
-        stack: error.stack,
-        url: importForm.url
-      })
+      console.error('Recipe import error:', error)
       
-      // Show user-friendly error with debugging info
-      const errorMessage = error.message.includes('Failed to fetch') 
-        ? 'Network error: Could not connect to recipe parser'
-        : error.message.includes('timeout')
-        ? 'Timeout error: Website took too long to respond'
-        : error.message.includes('Dependencies not available')
-        ? 'Server error: Recipe parser dependencies not installed'
-        : error.message
-
-      // Fallback to manual entry
       const siteName = extractSiteNameFromUrl(importForm.url)
       setImportForm(prev => ({
         ...prev,
@@ -431,7 +314,7 @@ const MealPlan = ({ family }) => {
         recipe: prev.recipe || 'Instructions available at the linked URL.'
       }))
       
-      alert(`❌ Could not auto-parse recipe: ${errorMessage}\n\nPlease fill in the details manually.\n\nCheck browser console (F12) for technical details.`)
+      alert('Recipe URL saved. Please add details manually.')
     } finally {
       setImporting(false)
     }
@@ -451,10 +334,8 @@ const MealPlan = ({ family }) => {
         ingredients: importForm.ingredients
       }
 
-      // Save to favorites
       await saveFavoriteRecipe(recipeData)
       
-      // If we're editing a meal, add it there too
       if (editingMeal) {
         setMealForm({
           name: recipeData.name,
@@ -465,16 +346,7 @@ const MealPlan = ({ family }) => {
         setShowImportModal(false)
       } else {
         setShowImportModal(false)
-        setImportForm({ 
-          url: '', 
-          name: '', 
-          ingredients: '', 
-          recipe: '',
-          cookTime: '',
-          servings: '',
-          author: '',
-          description: ''
-        })
+        setImportForm({ url: '', name: '', ingredients: '', recipe: '' })
       }
     } catch (error) {
       console.error('Error saving imported recipe:', error)
@@ -509,7 +381,6 @@ const MealPlan = ({ family }) => {
     setAvailableWeeks([...availableWeeks, nextWeek])
     setCurrentWeek(nextWeek)
     
-    // Initialize empty meals for the new week
     const emptyMeals = {}
     daysOfWeek.forEach(day => {
       emptyMeals[day] = {}
@@ -523,7 +394,7 @@ const MealPlan = ({ family }) => {
   const deleteWeek = async (weekToDelete) => {
     if (availableWeeks.length <= 1) return
 
-    if (confirm(`Are you sure you want to delete this week? This will remove all meals for that week.`)) {
+    if (confirm('Are you sure you want to delete this week? This will remove all meals for that week.')) {
       try {
         await supabase
           .from('meals')
@@ -544,7 +415,6 @@ const MealPlan = ({ family }) => {
           setCurrentWeek(newWeeks[0] || 1)
         }
 
-        // Remove from week names
         const newWeekNames = { ...weekNames }
         delete newWeekNames[weekToDelete]
         setWeekNames(newWeekNames)
@@ -558,14 +428,12 @@ const MealPlan = ({ family }) => {
     const nextWeek = Math.max(...availableWeeks, 0) + 1
     
     try {
-      // Get all meals from source week
       const { data: sourceMeals } = await supabase
         .from('meals')
         .select('*')
         .eq('family_id', family.family_id)
         .eq('week_number', sourceWeek)
 
-      // Create new meals for next week
       const newMeals = sourceMeals?.map(meal => ({
         family_id: meal.family_id,
         week_number: nextWeek,
@@ -583,7 +451,6 @@ const MealPlan = ({ family }) => {
           .insert(newMeals)
       }
 
-      // Copy week name if it exists
       const sourceWeekName = weekNames[sourceWeek]
       if (sourceWeekName) {
         await supabase
@@ -1015,7 +882,7 @@ const MealPlan = ({ family }) => {
       {/* Import Recipe Modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Import Recipe from URL</h3>
               <button
@@ -1040,57 +907,25 @@ const MealPlan = ({ family }) => {
                   <button
                     onClick={importRecipeFromUrl}
                     disabled={importing || !importForm.url}
-                    className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 disabled:opacity-50 min-w-[80px]"
+                    className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 disabled:opacity-50"
                   >
-                    {importing ? (
-                      <div className="flex items-center space-x-1">
-                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
-                        <span>Parsing...</span>
-                      </div>
-                    ) : (
-                      '🔍 Parse'
-                    )}
+                    {importing ? 'Importing...' : '🔗 Import'}
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Supports most recipe websites including AllRecipes, Food Network, Bon Appétit, and more!
+                  Enter a recipe URL and click Import to auto-fill the form
                 </p>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Recipe Name</label>
-                  <input
-                    type="text"
-                    value={importForm.name}
-                    onChange={(e) => setImportForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    placeholder="Enter recipe name"
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Cook Time</label>
-                    <input
-                      type="text"
-                      value={importForm.cookTime || ''}
-                      onChange={(e) => setImportForm(prev => ({ ...prev, cookTime: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      placeholder="30 min"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Servings</label>
-                    <input
-                      type="text"
-                      value={importForm.servings || ''}
-                      onChange={(e) => setImportForm(prev => ({ ...prev, servings: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      placeholder="4"
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Recipe Name</label>
+                <input
+                  type="text"
+                  value={importForm.name}
+                  onChange={(e) => setImportForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Enter recipe name"
+                />
               </div>
               
               <div>
@@ -1099,7 +934,7 @@ const MealPlan = ({ family }) => {
                   value={importForm.ingredients}
                   onChange={(e) => setImportForm(prev => ({ ...prev, ingredients: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  rows={6}
+                  rows={4}
                   placeholder="List ingredients (one per line)..."
                 />
               </div>
@@ -1110,38 +945,16 @@ const MealPlan = ({ family }) => {
                   value={importForm.recipe}
                   onChange={(e) => setImportForm(prev => ({ ...prev, recipe: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  rows={6}
+                  rows={4}
                   placeholder="Enter cooking instructions..."
                 />
               </div>
-              
-              {importForm.author && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Author</label>
-                  <input
-                    type="text"
-                    value={importForm.author}
-                    onChange={(e) => setImportForm(prev => ({ ...prev, author: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    placeholder="Recipe author"
-                  />
-                </div>
-              )}
               
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   onClick={() => {
                     setShowImportModal(false)
-                    setImportForm({ 
-                      url: '', 
-                      name: '', 
-                      ingredients: '', 
-                      recipe: '',
-                      cookTime: '',
-                      servings: '',
-                      author: '',
-                      description: ''
-                    })
+                    setImportForm({ url: '', name: '', ingredients: '', recipe: '' })
                   }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
                 >
@@ -1213,4 +1026,3 @@ const MealPlan = ({ family }) => {
 }
 
 export default MealPlan
-              </div>
