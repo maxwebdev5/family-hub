@@ -287,6 +287,7 @@ useEffect(() => {
 
 // Replace ONLY the importRecipeFromUrl function in your MealPlan.jsx
 // Don't add the extractSiteNameFromUrl function since you already have it
+// Replace your importRecipeFromUrl function with this corrected version:
 
 const importRecipeFromUrl = async () => {
   if (!importForm.url.trim()) {
@@ -364,53 +365,23 @@ const importRecipeFromUrl = async () => {
     } else if (error.message.includes('fetch')) {
       errorMessage += '\n\nCould not access the website. Please check the URL and try again.'
     }
-  }
-// Enhanced helper function for better URL validation
-const extractSiteNameFromUrl = (url) => {
-  try {
-    const urlObj = new URL(url)
-    let hostname = urlObj.hostname.replace('www.', '')
     
-    // Make it more readable for common sites
-    const siteNames = {
-      'allrecipes.com': 'AllRecipes',
-      'foodnetwork.com': 'Food Network',
-      'bonappetit.com': 'Bon Appétit',
-      'epicurious.com': 'Epicurious',
-      'tasty.co': 'Tasty',
-      'food.com': 'Food.com',
-      'delish.com': 'Delish',
-      'eatingwell.com': 'EatingWell',
-      'tasteofhome.com': 'Taste of Home',
-      'thekitchn.com': 'The Kitchn'
-    }
+    // Fallback: still allow manual entry with the URL
+    const siteName = extractSiteNameFromUrl(importForm.url)
+    setImportForm(prev => ({
+      ...prev,
+      name: prev.name || `Recipe from ${siteName}`,
+      recipe: prev.recipe || 'Instructions available at the linked URL.',
+      ingredients: prev.ingredients || 'Please add ingredients manually.'
+    }))
     
-    return siteNames[hostname] || hostname
-  } catch {
-    return 'Unknown Site'
+    errorMessage += '\n\nThe URL has been saved. Please add the recipe details manually.'
+    alert(errorMessage)
+    
+  } finally {
+    setImporting(false)
   }
-
-// Enhanced UI feedback component (optional addition to your modal)
-const RecipeImportProgress = ({ importing, message }) => {
-  if (!importing) return null
-  
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
-        <div className="text-center">
-          <div className="animate-spin text-4xl mb-4">🔄</div>
-          <h3 className="text-lg font-semibold mb-2">Importing Recipe</h3>
-          <p className="text-gray-600">{message || 'Please wait while we fetch the recipe...'}</p>
-          <div className="mt-4">
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+} // ← Make sure this closing brace exists!
 
   const saveImportedRecipe = async () => {
     if (!importForm.name) {
