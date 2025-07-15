@@ -20,16 +20,8 @@ const Chores = ({ family }) => {
     due_date: '',
     type: 'one-time',
     recurring_frequency: 'daily',
-    recurring_days: [],
-    points: 1,
-    difficulty: 'easy'
+    recurring_days: []
   })
-
-  const difficultyOptions = [
-    { value: 'easy', label: 'Easy (1-2 pts)', points: 1, color: 'bg-green-100 text-green-800' },
-    { value: 'medium', label: 'Medium (3-4 pts)', points: 3, color: 'bg-yellow-100 text-yellow-800' },
-    { value: 'hard', label: 'Hard (5+ pts)', points: 5, color: 'bg-red-100 text-red-800' }
-  ]
 
   const timezones = [
     'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
@@ -225,8 +217,6 @@ const Chores = ({ family }) => {
   const saveChore = async (e) => {
     e.preventDefault()
     try {
-      const difficultyPoints = difficultyOptions.find(d => d.value === choreForm.difficulty)?.points || 1
-      
       const choreData = {
         family_id: family.family_id,
         name: choreForm.name,
@@ -236,8 +226,6 @@ const Chores = ({ family }) => {
         recurring_frequency: choreForm.type === 'recurring' ? choreForm.recurring_frequency : null,
         recurring_days: choreForm.type === 'recurring' && choreForm.recurring_frequency === 'weekly' 
           ? choreForm.recurring_days : null,
-        points: difficultyPoints,
-        difficulty: choreForm.difficulty,
         completed: false,
         completed_at: null,
         updated_at: new Date().toISOString()
@@ -272,9 +260,7 @@ const Chores = ({ family }) => {
         due_date: '',
         type: 'one-time',
         recurring_frequency: 'daily',
-        recurring_days: [],
-        points: 1,
-        difficulty: 'easy'
+        recurring_days: []
       })
     } catch (error) {
       console.error('Error saving chore:', error)
@@ -332,11 +318,26 @@ const Chores = ({ family }) => {
     return desc
   }
 
-  const getDifficultyDisplay = (difficulty, points) => {
-    const config = difficultyOptions.find(d => d.value === difficulty)
-    return {
-      color: config?.color || 'bg-gray-100 text-gray-800',
-      label: `${difficulty} (${points || 1} pts)`
+  const clearCompletedChores = async () => {
+    if (!confirm('Are you sure you want to clear all completed chores? This will permanently delete them.')) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('chores')
+        .delete()
+        .eq('family_id', family.family_id)
+        .eq('completed', true)
+
+      if (error) throw error
+
+      // Remove completed chores from local state
+      setChores(chores.filter(chore => !chore.completed))
+      alert('Completed chores cleared successfully!')
+    } catch (error) {
+      console.error('Error clearing completed chores:', error)
+      alert('Error clearing completed chores: ' + error.message)
     }
   }
 
@@ -373,9 +374,7 @@ const Chores = ({ family }) => {
                 due_date: '',
                 type: 'one-time',
                 recurring_frequency: 'daily',
-                recurring_days: [],
-                points: 1,
-                difficulty: 'easy'
+                recurring_days: []
               })
               setShowChoreModal(true)
             }}
@@ -410,6 +409,14 @@ const Chores = ({ family }) => {
             >
               ✅ Completed ({completedChores.length})
             </button>
+            {completedChores.length > 0 && (
+              <button
+                onClick={clearCompletedChores}
+                className="ml-auto py-2 px-4 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200"
+              >
+                🗑️ Clear Completed
+              </button>
+            )}
           </nav>
         </div>
 
@@ -627,19 +634,6 @@ const Chores = ({ family }) => {
                   <option value="">Select family member</option>
                   {familyMembers.map(member => (
                     <option key={member.id} value={member.id}>{member.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty & Points</label>
-                <select
-                  value={choreForm.difficulty}
-                  onChange={(e) => setChoreForm(prev => ({ ...prev, difficulty: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {difficultyOptions.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
