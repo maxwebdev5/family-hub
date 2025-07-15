@@ -284,6 +284,29 @@ const Chores = ({ family }) => {
     }
   }
 
+  const clearCompletedChores = async () => {
+    if (!confirm('Are you sure you want to clear all completed chores? This will permanently delete them.')) {
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('chores')
+        .delete()
+        .eq('family_id', family.family_id)
+        .eq('completed', true)
+
+      if (error) throw error
+
+      // Remove completed chores from local state
+      setChores(chores.filter(chore => !chore.completed))
+      alert('Completed chores cleared successfully!')
+    } catch (error) {
+      console.error('Error clearing completed chores:', error)
+      alert('Error clearing completed chores: ' + error.message)
+    }
+  }
+
   const toggleRecurringDay = (day) => {
     const currentDays = choreForm.recurring_days || []
     if (currentDays.includes(day)) {
@@ -316,29 +339,6 @@ const Chores = ({ family }) => {
     }
     
     return desc
-  }
-
-  const clearCompletedChores = async () => {
-    if (!confirm('Are you sure you want to clear all completed chores? This will permanently delete them.')) {
-      return
-    }
-
-    try {
-      const { error } = await supabase
-        .from('chores')
-        .delete()
-        .eq('family_id', family.family_id)
-        .eq('completed', true)
-
-      if (error) throw error
-
-      // Remove completed chores from local state
-      setChores(chores.filter(chore => !chore.completed))
-      alert('Completed chores cleared successfully!')
-    } catch (error) {
-      console.error('Error clearing completed chores:', error)
-      alert('Error clearing completed chores: ' + error.message)
-    }
   }
 
   // Filter chores based on active tab
@@ -438,68 +438,60 @@ const Chores = ({ family }) => {
                 </p>
               </div>
             ) : (
-              displayChores.map(chore => {
-                const difficultyConfig = getDifficultyDisplay(chore.difficulty, chore.points)
-                return (
-                  <div key={chore.id} className={`rounded-lg shadow p-4 flex items-center justify-between ${
-                    chore.completed ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'
-                  }`}>
-                    <div className="flex items-center space-x-4">
-                      <input
-                        type="checkbox"
-                        checked={chore.completed}
-                        onChange={() => toggleChoreComplete(chore.id, chore.completed)}
-                        className="w-5 h-5"
-                      />
-                      <div>
-                        <div className={`font-medium ${chore.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
-                          {chore.name}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          Assigned to: {chore.family_members?.name || 'Unassigned'} | {getChoreDescription(chore)}
-                        </div>
-                        <div className="flex items-center space-x-2 mt-2">
-                          {chore.type === 'recurring' && (
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                              🔄 {chore.recurring_frequency === 'daily' ? 'Daily' : 'Weekly'}
-                            </span>
-                          )}
-                          <span className={`text-xs px-2 py-1 rounded font-medium ${difficultyConfig.color}`}>
-                            {difficultyConfig.label}
+              displayChores.map(chore => (
+                <div key={chore.id} className={`rounded-lg shadow p-4 flex items-center justify-between ${
+                  chore.completed ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'
+                }`}>
+                  <div className="flex items-center space-x-4">
+                    <input
+                      type="checkbox"
+                      checked={chore.completed}
+                      onChange={() => toggleChoreComplete(chore.id, chore.completed)}
+                      className="w-5 h-5"
+                    />
+                    <div>
+                      <div className={`font-medium ${chore.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                        {chore.name}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Assigned to: {chore.family_members?.name || 'Unassigned'} | {getChoreDescription(chore)}
+                      </div>
+                      <div className="flex items-center space-x-2 mt-2">
+                        {chore.type === 'recurring' && (
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                            🔄 {chore.recurring_frequency === 'daily' ? 'Daily' : 'Weekly'}
                           </span>
-                        </div>
+                        )}
                       </div>
                     </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => {
-                          setEditingChore(chore)
-                          setChoreForm({
-                            name: chore.name,
-                            assigned_to: chore.assigned_to || '',
-                            due_date: chore.due_date || '',
-                            type: chore.type || 'one-time',
-                            recurring_frequency: chore.recurring_frequency || 'daily',
-                            recurring_days: chore.recurring_days || [],
-                            points: chore.points || 1,
-                            difficulty: chore.difficulty || 'easy'
-                          })
-                          setShowChoreModal(true)
-                        }}
-                        className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => deleteChore(chore.id)}
-                        className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
-                      >
-                        🗑️
-                      </button>
-                    </div>
                   </div>
-                )
-              })
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        setEditingChore(chore)
+                        setChoreForm({
+                          name: chore.name,
+                          assigned_to: chore.assigned_to || '',
+                          due_date: chore.due_date || '',
+                          type: chore.type || 'one-time',
+                          recurring_frequency: chore.recurring_frequency || 'daily',
+                          recurring_days: chore.recurring_days || []
+                        })
+                        setShowChoreModal(true)
+                      }}
+                      className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => deleteChore(chore.id)}
+                      className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -595,7 +587,7 @@ const Chores = ({ family }) => {
         </div>
       )}
 
-      {/* Chore Modal (existing, with difficulty addition) */}
+      {/* Chore Modal */}
       {showChoreModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
