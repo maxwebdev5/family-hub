@@ -14,6 +14,11 @@ const FamilySettings = ({ family }) => {
     theme_color: 'blue',
     notifications_enabled: true
   })
+  const [choreSettings, setChoreSettings] = useState({
+    auto_reset_enabled: true,
+    reset_time: '06:00',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showMemberModal, setShowMemberModal] = useState(false)
@@ -49,10 +54,17 @@ const FamilySettings = ({ family }) => {
     { value: 0, name: 'Sunday' }
   ]
 
+  const timezones = [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Anchorage', 'Pacific/Honolulu', 'Europe/London', 'Europe/Paris',
+    'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Australia/Sydney'
+  ]
+
   useEffect(() => {
     if (family) {
       loadFamilyMembers()
       loadFamilySettings()
+      loadChoreSettings()
     }
   }, [family])
 
@@ -88,6 +100,28 @@ const FamilySettings = ({ family }) => {
       }
     } catch (error) {
       console.error('Error loading family settings:', error)
+    }
+  }
+
+  const loadChoreSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chore_settings')
+        .select('*')
+        .eq('family_id', family.family_id)
+        .maybeSingle()
+
+      if (error && error.code !== 'PGRST116') throw error
+      
+      if (data) {
+        setChoreSettings({
+          auto_reset_enabled: data.auto_reset_enabled,
+          reset_time: data.reset_time?.substring(0, 5) || '06:00',
+          timezone: data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+        })
+      }
+    } catch (error) {
+      console.error('Error loading chore settings:', error)
     } finally {
       setLoading(false)
     }
@@ -96,7 +130,8 @@ const FamilySettings = ({ family }) => {
   const saveSettings = async () => {
     setSaving(true)
     try {
-      const { error } = await supabase
+      // Save family settings
+      const { error: familyError } = await supabase
         .from('family_settings')
         .update({
           ...settings,
@@ -104,11 +139,25 @@ const FamilySettings = ({ family }) => {
         })
         .eq('family_id', family.family_id)
 
-      if (error) throw error
+      if (familyError) throw familyError
+
+      // Save chore settings
+      const { error: choreError } = await supabase
+        .from('chore_settings')
+        .upsert({
+          family_id: family.family_id,
+          auto_reset_enabled: choreSettings.auto_reset_enabled,
+          reset_time: choreSettings.reset_time,
+          timezone: choreSettings.timezone,
+          updated_at: new Date().toISOString()
+        })
+
+      if (choreError) throw choreError
+      
       alert('Settings saved successfully!')
     } catch (error) {
       console.error('Error saving settings:', error)
-      alert('Error saving settings')
+      alert('Error saving settings: ' + error.message)
     } finally {
       setSaving(false)
     }
@@ -282,6 +331,59 @@ const FamilySettings = ({ family }) => {
         </div>
       </div>
 
+      {/* Chore Reset Settings */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold mb-6">Chore Reset Settings</h3>
+        
+        <div className="space-y-4">
+          <label className="flex items-center space-x-3">
+            <input
+              type="checkbox"
+              checked={choreSettings.auto_reset_enabled}
+              onChange={(e) => setChoreSettings(prev => ({ ...prev, auto_reset_enabled: e.target.checked }))}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Enable automatic chore reset</div>
+              <div className="text-sm text-gray-600">Automatically reset recurring chores at specified time each day</div>
+            </div>
+          </label>
+
+          {choreSettings.auto_reset_enabled && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 ml-7">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reset Time
+                </label>
+                <input
+                  type="time"
+                  value={choreSettings.reset_time}
+                  onChange={(e) => setChoreSettings(prev => ({ ...prev, reset_time: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Time when daily chore reset occurs</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Family Timezone
+                </label>
+                <select
+                  value={choreSettings.timezone}
+                  onChange={(e) => setChoreSettings(prev => ({ ...prev, timezone: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {timezones.map(tz => (
+                    <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Timezone for chore reset timing</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Permissions Section */}
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold mb-6">Permissions & Features</h3>
@@ -316,19 +418,6 @@ const FamilySettings = ({ family }) => {
           <label className="flex items-center space-x-3">
             <input
               type="checkbox"
-              checked={settings.chore_points_enabled}
-              onChange={(e) => setSettings(prev => ({ ...prev, chore_points_enabled: e.target.checked }))}
-              className="w-4 h-4"
-            />
-            <div>
-              <div className="font-medium">Enable chore points system</div>
-              <div className="text-sm text-gray-600">Track points for completed chores</div>
-            </div>
-          </label>
-
-          <label className="flex items-center space-x-3">
-            <input
-              type="checkbox"
               checked={settings.require_photo_verification}
               onChange={(e) => setSettings(prev => ({ ...prev, require_photo_verification: e.target.checked }))}
               className="w-4 h-4"
@@ -351,40 +440,6 @@ const FamilySettings = ({ family }) => {
               <div className="text-sm text-gray-600">Send reminders and updates</div>
             </div>
           </label>
-        </div>
-      </div>
-
-      {/* Schedule Settings */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-6">Schedule Settings</h3>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Daily chore reset time
-            </label>
-            <input
-              type="time"
-              value={settings.daily_chore_reset_time}
-              onChange={(e) => setSettings(prev => ({ ...prev, daily_chore_reset_time: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Weekly chore reset day
-            </label>
-            <select
-              value={settings.weekly_chore_reset_day}
-              onChange={(e) => setSettings(prev => ({ ...prev, weekly_chore_reset_day: parseInt(e.target.value) }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {weekDays.map(day => (
-                <option key={day.value} value={day.value}>{day.name}</option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
