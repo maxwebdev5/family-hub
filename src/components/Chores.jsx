@@ -5,21 +5,46 @@ const Chores = ({ family }) => {
   const [chores, setChores] = useState([])
   const [familyMembers, setFamilyMembers] = useState([])
   const [showChoreModal, setShowChoreModal] = useState(false)
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [editingChore, setEditingChore] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('active') // 'active' or 'completed'
+  const [choreSettings, setChoreSettings] = useState({
+    auto_reset_enabled: true,
+    reset_time: '06:00',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  })
   const [choreForm, setChoreForm] = useState({
     name: '',
     assigned_to: '',
     due_date: '',
     type: 'one-time',
     recurring_frequency: 'daily',
-    recurring_days: []
+    recurring_days: [],
+    points: 1,
+    difficulty: 'easy'
   })
+
+  const difficultyOptions = [
+    { value: 'easy', label: 'Easy (1-2 pts)', points: 1, color: 'bg-green-100 text-green-800' },
+    { value: 'medium', label: 'Medium (3-4 pts)', points: 3, color: 'bg-yellow-100 text-yellow-800' },
+    { value: 'hard', label: 'Hard (5+ pts)', points: 5, color: 'bg-red-100 text-red-800' }
+  ]
+
+  const timezones = [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Anchorage', 'Pacific/Honolulu', 'Europe/London', 'Europe/Paris',
+    'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Australia/Sydney'
+  ]
 
   useEffect(() => {
     if (family) {
       loadChores()
       loadFamilyMembers()
+      loadChoreSettings()
+      // Set up auto-reset interval (check every hour)
+      const interval = setInterval(checkAndResetChores, 60 * 60 * 1000)
+      return () => clearInterval(interval)
     }
   }, [family])
 
@@ -32,6 +57,7 @@ const Chores = ({ family }) => {
           family_members!assigned_to(id, name)
         `)
         .eq('family_id', family.family_id)
+        .order('completed', { ascending: true })
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -57,19 +83,138 @@ const Chores = ({ family }) => {
     }
   }
 
+  const loadChoreSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chore_settings')
+        .select('*')
+        .eq('family_id', family.family_id)
+        .maybeSingle()
+
+      if (error && error.code !== 'PGRST116') throw error
+      
+      if (data) {
+        setChoreSettings({
+          auto_reset_enabled: data.auto_reset_enabled,
+          reset_time: data.reset_time?.substring(0, 5) || '06:00',
+          timezone: data.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+        })
+      }
+    } catch (error) {
+      console.error('Error loading chore settings:', error)
+    }
+  }
+
+  const saveChoreSettings = async () => {
+    try {
+      const { error } = await supabase
+        .from('chore_settings')
+        .upsert({
+          family_id: family.family_id,
+          auto_reset_enabled: choreSettings.auto_reset_enabled,
+          reset_time: choreSettings.reset_time,
+          timezone: choreSettings.timezone,
+          updated_at: new Date().toISOString()
+        })
+
+      if (error) throw error
+      
+      setShowSettingsModal(false)
+      alert('Chore settings saved successfully!')
+    } catch (error) {
+      console.error('Error saving chore settings:', error)
+      alert('Error saving settings: ' + error.message)
+    }
+  }
+
+  const checkAndResetChores = async () => {
+    try {
+      // Get current time in the family's timezone
+      const now = new Date()
+      const familyTime = new Date(now.toLocaleString("en-US", {timeZone: choreSettings.timezone}))
+      const currentTime = familyTime.toTimeString().slice(0, 5)
+      const currentDay = familyTime.toLocaleDateString('en-US', { weekday: 'long' })
+      
+      // Check if it's time to reset (within 1 hour of reset time)
+      const resetTime = choreSettings.reset_time
+      const resetHour = parseInt(resetTime.split(':')[0])
+      const currentHour = familyTime.getHours()
+      
+      if (Math.abs(currentHour - resetHour) <= 1) {
+        console.log('Checking for chores to reset...')
+        
+        // Get all recurring chores that are completed
+        const { data: choresToReset } = await supabase
+          .from('chores')
+          .select('*')
+          .eq('family_id', family.family_id)
+          .eq('type', 'recurring')
+          .eq('completed', true)
+
+        const choreUpdates = []
+        
+        choresToReset?.forEach(chore => {
+          let shouldReset = false
+          
+          if (chore.recurring_frequency === 'daily') {
+            shouldReset = true
+          } else if (chore.recurring_frequency === 'weekly' && chore.recurring_days?.includes(currentDay)) {
+            shouldReset = true
+          }
+          
+          if (shouldReset) {
+            choreUpdates.push({
+              id: chore.id,
+              completed: false,
+              completed_at: null,
+              updated_at: new Date().toISOString()
+            })
+          }
+        })
+        
+        if (choreUpdates.length > 0) {
+          console.log(`Resetting ${choreUpdates.length} recurring chores`)
+          
+          for (const update of choreUpdates) {
+            await supabase
+              .from('chores')
+              .update({
+                completed: update.completed,
+                completed_at: update.completed_at,
+                updated_at: update.updated_at
+              })
+              .eq('id', update.id)
+          }
+          
+          // Reload chores to reflect changes
+          loadChores()
+        }
+      }
+    } catch (error) {
+      console.error('Error in auto-reset:', error)
+    }
+  }
+
   const toggleChoreComplete = async (choreId, completed) => {
     try {
+      const completedAt = !completed ? new Date().toISOString() : null
+      
       const { error } = await supabase
         .from('chores')
         .update({ 
-          completed: !completed, 
+          completed: !completed,
+          completed_at: completedAt,
           updated_at: new Date().toISOString() 
         })
         .eq('id', choreId)
 
       if (!error) {
         setChores(chores.map(chore => 
-          chore.id === choreId ? { ...chore, completed: !completed } : chore
+          chore.id === choreId ? { 
+            ...chore, 
+            completed: !completed, 
+            completed_at: completedAt 
+          } : chore
         ))
       }
     } catch (error) {
@@ -80,6 +225,8 @@ const Chores = ({ family }) => {
   const saveChore = async (e) => {
     e.preventDefault()
     try {
+      const difficultyPoints = difficultyOptions.find(d => d.value === choreForm.difficulty)?.points || 1
+      
       const choreData = {
         family_id: family.family_id,
         name: choreForm.name,
@@ -89,7 +236,10 @@ const Chores = ({ family }) => {
         recurring_frequency: choreForm.type === 'recurring' ? choreForm.recurring_frequency : null,
         recurring_days: choreForm.type === 'recurring' && choreForm.recurring_frequency === 'weekly' 
           ? choreForm.recurring_days : null,
+        points: difficultyPoints,
+        difficulty: choreForm.difficulty,
         completed: false,
+        completed_at: null,
         updated_at: new Date().toISOString()
       }
 
@@ -122,7 +272,9 @@ const Chores = ({ family }) => {
         due_date: '',
         type: 'one-time',
         recurring_frequency: 'daily',
-        recurring_days: []
+        recurring_days: [],
+        points: 1,
+        difficulty: 'easy'
       })
     } catch (error) {
       console.error('Error saving chore:', error)
@@ -162,17 +314,36 @@ const Chores = ({ family }) => {
   }
 
   const getChoreDescription = (chore) => {
+    let desc = ''
     if (chore.type === 'one-time') {
-      return chore.due_date ? `Due: ${new Date(chore.due_date).toLocaleDateString()}` : 'One-time task'
+      desc = chore.due_date ? `Due: ${new Date(chore.due_date).toLocaleDateString()}` : 'One-time task'
     } else if (chore.recurring_frequency === 'daily') {
-      return 'Recurring: Daily'
+      desc = 'Recurring: Daily'
     } else if (chore.recurring_frequency === 'weekly') {
       const days = chore.recurring_days || []
-      if (days.length === 0) return 'Recurring: Weekly'
-      return `Recurring: ${days.join(', ')}`
+      desc = days.length === 0 ? 'Recurring: Weekly' : `Recurring: ${days.join(', ')}`
     }
-    return ''
+    
+    if (chore.completed_at) {
+      const completedDate = new Date(chore.completed_at)
+      desc += ` • Completed: ${completedDate.toLocaleDateString()} at ${completedDate.toLocaleTimeString()}`
+    }
+    
+    return desc
   }
+
+  const getDifficultyDisplay = (difficulty, points) => {
+    const config = difficultyOptions.find(d => d.value === difficulty)
+    return {
+      color: config?.color || 'bg-gray-100 text-gray-800',
+      label: `${difficulty} (${points || 1} pts)`
+    }
+  }
+
+  // Filter chores based on active tab
+  const activeChores = chores.filter(chore => !chore.completed)
+  const completedChores = chores.filter(chore => chore.completed)
+  const displayChores = activeTab === 'active' ? activeChores : completedChores
 
   if (loading) {
     return (
@@ -186,87 +357,238 @@ const Chores = ({ family }) => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Chore Chart</h2>
-        <button
-          onClick={() => {
-            setEditingChore(null)
-            setChoreForm({
-              name: '',
-              assigned_to: '',
-              due_date: '',
-              type: 'one-time',
-              recurring_frequency: 'daily',
-              recurring_days: []
-            })
-            setShowChoreModal(true)
-          }}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-        >
-          ➕ Add Chore
-        </button>
+        <div className="flex space-x-2">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
+          >
+            ⚙️ Settings
+          </button>
+          <button
+            onClick={() => {
+              setEditingChore(null)
+              setChoreForm({
+                name: '',
+                assigned_to: '',
+                due_date: '',
+                type: 'one-time',
+                recurring_frequency: 'daily',
+                recurring_days: [],
+                points: 1,
+                difficulty: 'easy'
+              })
+              setShowChoreModal(true)
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            ➕ Add Chore
+          </button>
+        </div>
       </div>
 
-      <div className="grid gap-4">
-        {chores.length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <div className="text-4xl mb-4">📝</div>
-            <h3 className="text-lg font-semibold text-gray-700 mb-2">No chores yet</h3>
-            <p className="text-gray-500">Click "Add Chore" to get started!</p>
-          </div>
-        ) : (
-          chores.map(chore => (
-            <div key={chore.id} className="bg-white rounded-lg shadow p-4 flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <input
-                  type="checkbox"
-                  checked={chore.completed}
-                  onChange={() => toggleChoreComplete(chore.id, chore.completed)}
-                  className="w-5 h-5"
-                />
-                <div>
-                  <div className={`font-medium ${chore.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
-                    {chore.name}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Assigned to: {chore.family_members?.name || 'Unassigned'} | {getChoreDescription(chore)}
-                  </div>
-                  {chore.type === 'recurring' && (
-                    <div className="text-xs text-blue-600 font-medium">
-                      🔄 {chore.recurring_frequency === 'daily' ? 'Daily' : 'Weekly'}
-                    </div>
-                  )}
+      {/* Tab Navigation */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="border-b border-gray-200">
+          <nav className="flex space-x-8" aria-label="Tabs">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'active'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              🎯 Active Chores ({activeChores.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('completed')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'completed'
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              ✅ Completed ({completedChores.length})
+            </button>
+          </nav>
+        </div>
+
+        {/* Chore List */}
+        <div className="p-6">
+          <div className="grid gap-4">
+            {displayChores.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-4">
+                  {activeTab === 'active' ? '🎯' : '✅'}
                 </div>
+                <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                  {activeTab === 'active' ? 'No active chores' : 'No completed chores'}
+                </h3>
+                <p className="text-gray-500">
+                  {activeTab === 'active' 
+                    ? 'All chores are complete! Great job!' 
+                    : 'Complete some chores to see them here.'}
+                </p>
               </div>
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => {
-                    setEditingChore(chore)
-                    setChoreForm({
-                      name: chore.name,
-                      assigned_to: chore.assigned_to || '',
-                      due_date: chore.due_date || '',
-                      type: chore.type || 'one-time',
-                      recurring_frequency: chore.recurring_frequency || 'daily',
-                      recurring_days: chore.recurring_days || []
-                    })
-                    setShowChoreModal(true)
-                  }}
-                  className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
-                >
-                  ✏️
-                </button>
-                <button
-                  onClick={() => deleteChore(chore.id)}
-                  className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
-                >
-                  🗑️
-                </button>
-              </div>
-            </div>
-          ))
-        )}
+            ) : (
+              displayChores.map(chore => {
+                const difficultyConfig = getDifficultyDisplay(chore.difficulty, chore.points)
+                return (
+                  <div key={chore.id} className={`rounded-lg shadow p-4 flex items-center justify-between ${
+                    chore.completed ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'
+                  }`}>
+                    <div className="flex items-center space-x-4">
+                      <input
+                        type="checkbox"
+                        checked={chore.completed}
+                        onChange={() => toggleChoreComplete(chore.id, chore.completed)}
+                        className="w-5 h-5"
+                      />
+                      <div>
+                        <div className={`font-medium ${chore.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                          {chore.name}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Assigned to: {chore.family_members?.name || 'Unassigned'} | {getChoreDescription(chore)}
+                        </div>
+                        <div className="flex items-center space-x-2 mt-2">
+                          {chore.type === 'recurring' && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                              🔄 {chore.recurring_frequency === 'daily' ? 'Daily' : 'Weekly'}
+                            </span>
+                          )}
+                          <span className={`text-xs px-2 py-1 rounded font-medium ${difficultyConfig.color}`}>
+                            {difficultyConfig.label}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => {
+                          setEditingChore(chore)
+                          setChoreForm({
+                            name: chore.name,
+                            assigned_to: chore.assigned_to || '',
+                            due_date: chore.due_date || '',
+                            type: chore.type || 'one-time',
+                            recurring_frequency: chore.recurring_frequency || 'daily',
+                            recurring_days: chore.recurring_days || [],
+                            points: chore.points || 1,
+                            difficulty: chore.difficulty || 'easy'
+                          })
+                          setShowChoreModal(true)
+                        }}
+                        className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-600"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => deleteChore(chore.id)}
+                        className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-600"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Chore Modal */}
+      {/* Auto-reset info banner */}
+      {choreSettings.auto_reset_enabled && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-blue-600">🔄</span>
+            <span className="text-blue-800 text-sm">
+              Auto-reset enabled: Recurring chores reset daily at {choreSettings.reset_time} ({choreSettings.timezone})
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Chore Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Chore Settings</h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    checked={choreSettings.auto_reset_enabled}
+                    onChange={(e) => setChoreSettings(prev => ({ ...prev, auto_reset_enabled: e.target.checked }))}
+                    className="w-4 h-4"
+                  />
+                  <div>
+                    <div className="font-medium">Enable auto-reset</div>
+                    <div className="text-sm text-gray-600">Automatically reset recurring chores at specified time</div>
+                  </div>
+                </label>
+              </div>
+
+              {choreSettings.auto_reset_enabled && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Reset Time</label>
+                    <input
+                      type="time"
+                      value={choreSettings.reset_time}
+                      onChange={(e) => setChoreSettings(prev => ({ ...prev, reset_time: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Time when daily chores reset (24-hour format)</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Timezone</label>
+                    <select
+                      value={choreSettings.timezone}
+                      onChange={(e) => setChoreSettings(prev => ({ ...prev, timezone: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {timezones.map(tz => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">Family timezone for chore resets</p>
+                  </div>
+                </>
+              )}
+            </div>
+            
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveChoreSettings}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                💾 Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chore Modal (existing, with difficulty addition) */}
       {showChoreModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -305,6 +627,19 @@ const Chores = ({ family }) => {
                   <option value="">Select family member</option>
                   {familyMembers.map(member => (
                     <option key={member.id} value={member.id}>{member.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty & Points</label>
+                <select
+                  value={choreForm.difficulty}
+                  onChange={(e) => setChoreForm(prev => ({ ...prev, difficulty: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {difficultyOptions.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
