@@ -191,6 +191,16 @@ const Chores = ({ family }) => {
     try {
       const completedAt = !completed ? new Date().toISOString() : null
       
+      // Immediately update local state for instant feedback
+      setChores(chores.map(chore => 
+        chore.id === choreId ? { 
+          ...chore, 
+          completed: !completed, 
+          completed_at: completedAt 
+        } : chore
+      ))
+
+      // Update database
       const { error } = await supabase
         .from('chores')
         .update({ 
@@ -200,17 +210,27 @@ const Chores = ({ family }) => {
         })
         .eq('id', choreId)
 
-      if (!error) {
+      if (error) {
+        // If database update fails, revert the local state
         setChores(chores.map(chore => 
           chore.id === choreId ? { 
             ...chore, 
-            completed: !completed, 
-            completed_at: completedAt 
+            completed: completed, 
+            completed_at: chore.completed_at 
           } : chore
         ))
+        console.error('Error updating chore:', error)
       }
     } catch (error) {
       console.error('Error updating chore:', error)
+      // Revert local state on error
+      setChores(chores.map(chore => 
+        chore.id === choreId ? { 
+          ...chore, 
+          completed: completed, 
+          completed_at: chore.completed_at 
+        } : chore
+      ))
     }
   }
 
@@ -409,7 +429,8 @@ const Chores = ({ family }) => {
             >
               ✅ Completed ({completedChores.length})
             </button>
-            {completedChores.length > 0 && (
+            {/* Clear Completed button only shows in completed tab */}
+            {activeTab === 'completed' && completedChores.length > 0 && (
               <button
                 onClick={clearCompletedChores}
                 className="ml-auto py-2 px-4 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200"
