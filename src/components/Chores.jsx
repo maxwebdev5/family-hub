@@ -7,7 +7,7 @@ const Chores = ({ family }) => {
   const [showChoreModal, setShowChoreModal] = useState(false)
   const [editingChore, setEditingChore] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('active') // 'active' or 'completed'
+  const [activeTab, setActiveTab] = useState('active') // 'active' or 'archived'
   const [choreForm, setChoreForm] = useState({
     name: '',
     assigned_to: '',
@@ -16,12 +16,6 @@ const Chores = ({ family }) => {
     recurring_frequency: 'daily',
     recurring_days: []
   })
-
-  const timezones = [
-    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-    'America/Anchorage', 'Pacific/Honolulu', 'Europe/London', 'Europe/Paris',
-    'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Australia/Sydney'
-  ]
 
   useEffect(() => {
     if (family) {
@@ -205,7 +199,7 @@ const Chores = ({ family }) => {
   }
 
   const clearCompletedChores = async () => {
-    if (!confirm('Are you sure you want to clear all completed chores? This will permanently delete them.')) {
+    if (!confirm('Are you sure you want to clear all archived chores? This will permanently delete them.')) {
       return
     }
 
@@ -220,10 +214,10 @@ const Chores = ({ family }) => {
 
       // Remove archived completed chores from local state
       setChores(chores.filter(chore => !chore.archived_completed))
-      alert('Completed chores cleared successfully!')
+      alert('Archived chores cleared successfully!')
     } catch (error) {
-      console.error('Error clearing completed chores:', error)
-      alert('Error clearing completed chores: ' + error.message)
+      console.error('Error clearing archived chores:', error)
+      alert('Error clearing archived chores: ' + error.message)
     }
   }
 
@@ -263,10 +257,10 @@ const Chores = ({ family }) => {
 
   // Filter chores based on active tab and archived state
   // Active tab: chores that are not completed OR completed but not yet archived
-  // Completed tab: chores that are completed AND archived
+  // Archived tab: chores that are completed AND archived
   const activeChores = chores.filter(chore => !chore.completed || !chore.archived_completed)
-  const completedChores = chores.filter(chore => chore.completed && chore.archived_completed)
-  const displayChores = activeTab === 'active' ? activeChores : completedChores
+  const archivedChores = chores.filter(chore => chore.completed && chore.archived_completed)
+  const displayChores = activeTab === 'active' ? activeChores : archivedChores
 
   if (loading) {
     return (
@@ -316,22 +310,22 @@ const Chores = ({ family }) => {
               🎯 Active Chores ({activeChores.length})
             </button>
             <button
-              onClick={() => setActiveTab('completed')}
+              onClick={() => setActiveTab('archived')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'completed'
+                activeTab === 'archived'
                   ? 'border-green-500 text-green-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              ✅ Completed ({completedChores.length})
+              📦 Archived ({archivedChores.length})
             </button>
-            {/* Clear Completed button only shows in completed tab */}
-            {activeTab === 'completed' && completedChores.length > 0 && (
+            {/* Clear Archived button only shows in archived tab */}
+            {activeTab === 'archived' && archivedChores.length > 0 && (
               <button
                 onClick={clearCompletedChores}
                 className="ml-auto py-2 px-4 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200"
               >
-                🗑️ Clear Completed
+                🗑️ Clear Archived
               </button>
             )}
           </nav>
@@ -343,15 +337,15 @@ const Chores = ({ family }) => {
             {displayChores.length === 0 ? (
               <div className="text-center py-8">
                 <div className="text-4xl mb-4">
-                  {activeTab === 'active' ? '🎯' : '✅'}
+                  {activeTab === 'active' ? '🎯' : '📦'}
                 </div>
                 <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                  {activeTab === 'active' ? 'No active chores' : 'No completed chores'}
+                  {activeTab === 'active' ? 'No active chores' : 'No archived chores'}
                 </h3>
                 <p className="text-gray-500">
                   {activeTab === 'active' 
                     ? 'All chores are complete! Great job!' 
-                    : 'Complete some chores to see them here.'}
+                    : 'Complete some chores to see them here after reset.'}
                 </p>
               </div>
             ) : (
@@ -381,12 +375,12 @@ const Chores = ({ family }) => {
                         )}
                         {chore.completed && !chore.archived_completed && (
                           <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
-                            ⏰ Will move to completed at next reset
+                            ⏰ Will move to archived at next reset
                           </span>
                         )}
                         {chore.completed && chore.archived_completed && (
                           <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                            ✅ Completed
+                            📦 Archived
                           </span>
                         )}
                       </div>
@@ -423,6 +417,142 @@ const Chores = ({ family }) => {
           </div>
         </div>
       </div>
+
+      {/* Chore Modal */}
+      {showChoreModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">
+                {editingChore ? 'Edit Chore' : 'Add New Chore'}
+              </h3>
+              <button
+                onClick={() => setShowChoreModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={saveChore} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Chore Name</label>
+                <input
+                  type="text"
+                  value={choreForm.name}
+                  onChange={(e) => setChoreForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter chore name"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Assign To</label>
+                <select
+                  value={choreForm.assigned_to}
+                  onChange={(e) => setChoreForm(prev => ({ ...prev, assigned_to: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select family member</option>
+                  {familyMembers.map(member => (
+                    <option key={member.id} value={member.id}>{member.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Chore Type</label>
+                <div className="flex space-x-4">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      value="one-time"
+                      checked={choreForm.type === 'one-time'}
+                      onChange={(e) => setChoreForm(prev => ({ ...prev, type: e.target.value }))}
+                      className="mr-2"
+                    />
+                    One-time
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      value="recurring"
+                      checked={choreForm.type === 'recurring'}
+                      onChange={(e) => setChoreForm(prev => ({ ...prev, type: e.target.value }))}
+                      className="mr-2"
+                    />
+                    Recurring
+                  </label>
+                </div>
+              </div>
+
+              {choreForm.type === 'one-time' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Due Date</label>
+                  <input
+                    type="date"
+                    value={choreForm.due_date}
+                    onChange={(e) => setChoreForm(prev => ({ ...prev, due_date: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {choreForm.type === 'recurring' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Recurring Frequency</label>
+                    <select
+                      value={choreForm.recurring_frequency}
+                      onChange={(e) => setChoreForm(prev => ({ ...prev, recurring_frequency: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                    </select>
+                  </div>
+
+                  {choreForm.recurring_frequency === 'weekly' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Select Days</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
+                          <label key={day} className="flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={(choreForm.recurring_days || []).includes(day)}
+                              onChange={() => toggleRecurringDay(day)}
+                              className="mr-2"
+                            />
+                            {day}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              
+              <div className="flex justify-end space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowChoreModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  💾 Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
