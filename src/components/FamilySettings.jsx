@@ -141,18 +141,34 @@ const FamilySettings = ({ family }) => {
 
       if (familyError) throw familyError
 
-      // Save chore settings
-      const { error: choreError } = await supabase
+      // Save chore settings - use UPDATE first, then INSERT if needed
+      const { error: updateError } = await supabase
         .from('chore_settings')
-        .upsert({
-          family_id: family.family_id,
+        .update({
           auto_reset_enabled: choreSettings.auto_reset_enabled,
           reset_time: choreSettings.reset_time,
           timezone: choreSettings.timezone,
           updated_at: new Date().toISOString()
         })
+        .eq('family_id', family.family_id)
 
-      if (choreError) throw choreError
+      // If no rows were updated (doesn't exist), insert a new one
+      if (updateError && updateError.code === 'PGRST116') {
+        const { error: insertError } = await supabase
+          .from('chore_settings')
+          .insert({
+            family_id: family.family_id,
+            auto_reset_enabled: choreSettings.auto_reset_enabled,
+            reset_time: choreSettings.reset_time,
+            timezone: choreSettings.timezone,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+
+        if (insertError) throw insertError
+      } else if (updateError) {
+        throw updateError
+      }
       
       alert('Settings saved successfully!')
     } catch (error) {
